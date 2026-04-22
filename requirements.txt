@@ -1,0 +1,6 @@
+streamlit
+proxmoxer
+requests
+pandas
+python-dotenv
+watchdog
