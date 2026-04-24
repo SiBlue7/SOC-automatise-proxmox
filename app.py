@@ -1,28 +1,30 @@
-import os
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
-from proxmoxer import ProxmoxAPI
 
-
-MAX_HISTORY_POINTS = 30
-
-load_dotenv()
-
-
-def parse_bool(value: Optional[str], default: bool = False) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def sanitize_host(raw_host: str) -> str:
-    host = raw_host.strip()
-    host = host.removeprefix("https://").removeprefix("http://")
-    return host.rstrip("/")
+from actions import get_net0_state, is_protected_vmid, set_vm_network_state
+from config import AppConfig, read_settings
+from detection import AlertCandidate, evaluate_detection
+from proxmox_client import (
+    connect_proxmox_with_token,
+    fetch_node_status,
+    fetch_nodes,
+    fetch_qemu_vms,
+    fetch_vm_statuses,
+)
+from storage import (
+    fetch_actions,
+    fetch_alerts,
+    fetch_soc_metrics,
+    init_db,
+    insert_action,
+    insert_host_metric,
+    insert_vm_metric,
+    resolve_alerts_for_node,
+    upsert_alert,
+)
 
 
 def bytes_to_gib(value: int) -> float:
@@ -57,178 +59,25 @@ def format_uptime(seconds: int) -> str:
     return " ".join(parts)
 
 
-def read_settings() -> Dict[str, object]:
-    settings = {
-        "host": os.getenv("PROXMOX_HOST", "").strip(),
-        "user": os.getenv("PROXMOX_USER", "").strip(),
-        "token_id": os.getenv("PROXMOX_TOKEN_ID", "").strip(),
-        "token_secret": os.getenv("PROXMOX_SECRET", "").strip(),
-        "verify_ssl": parse_bool(os.getenv("VERIFY_SSL"), default=False),
+def format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "0s"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, remainder = divmod(int(seconds), 60)
+    if minutes < 60:
+        return f"{minutes}m {remainder}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
+
+
+def severity_badge(severity: str) -> str:
+    labels = {
+        "critical": "Critique",
+        "medium": "Moyen",
+        "low": "Faible",
     }
-
-    missing = [key for key, value in settings.items() if key != "verify_ssl" and not value]
-    if missing:
-        env_names = {
-            "host": "PROXMOX_HOST",
-            "user": "PROXMOX_USER",
-            "token_id": "PROXMOX_TOKEN_ID",
-            "token_secret": "PROXMOX_SECRET",
-        }
-        missing_vars = ", ".join(env_names[name] for name in missing)
-        raise ValueError(
-            f"Variables d'environnement manquantes: {missing_vars}. "
-            "Complete le fichier .env avant de lancer l'application."
-        )
-
-    settings["host"] = sanitize_host(str(settings["host"]))
-    return settings
-
-
-@st.cache_resource(show_spinner=False)
-def connect_proxmox(host: str, user: str, token_id: str, token_secret: str, verify_ssl: bool):
-    proxmox = ProxmoxAPI(
-        host,
-        user=user,
-        token_name=token_id,
-        token_value=token_secret,
-        verify_ssl=verify_ssl,
-    )
-    proxmox.version.get()
-    return proxmox
-
-
-def get_connection() -> Tuple[object, str]:
-    try:
-        settings = read_settings()
-        proxmox = connect_proxmox(
-            host=str(settings["host"]),
-            user=str(settings["user"]),
-            token_id=str(settings["token_id"]),
-            token_secret=str(settings["token_secret"]),
-            verify_ssl=bool(settings["verify_ssl"]),
-        )
-        return proxmox, ""
-    except Exception as exc:
-        return None, str(exc)
-
-
-def fetch_nodes(proxmox) -> List[Dict[str, object]]:
-    return list(proxmox.nodes.get())
-
-
-def fetch_node_status(proxmox, node_name: str) -> Dict[str, object]:
-    return dict(proxmox.nodes(node_name).status.get())
-
-
-def fetch_qemu_vms(proxmox, node_name: str) -> List[Dict[str, object]]:
-    vms = proxmox.nodes(node_name).qemu.get()
-    return sorted(vms, key=lambda vm: vm.get("vmid", 0))
-
-
-def fetch_vm_statuses(proxmox, node_name: str, vms: List[Dict[str, object]]) -> Dict[int, Dict[str, object]]:
-    statuses: Dict[int, Dict[str, object]] = {}
-    for vm in vms:
-        vmid = int(vm["vmid"])
-        vm_status = {
-            "vmid": vmid,
-            "name": vm.get("name") or f"VM {vmid}",
-            "status": vm.get("status", "unknown"),
-            "cpu": float(vm.get("cpu", 0.0)),
-            "mem": int(vm.get("mem", 0)),
-            "maxmem": int(vm.get("maxmem", 0)),
-            "uptime": int(vm.get("uptime", 0)),
-        }
-        try:
-            current_status = dict(proxmox.nodes(node_name).qemu(vmid).status.current.get())
-            vm_status.update(
-                {
-                    "status": current_status.get("status", vm_status["status"]),
-                    "cpu": float(current_status.get("cpu", vm_status["cpu"])),
-                    "mem": int(current_status.get("mem", vm_status["mem"])),
-                    "maxmem": int(current_status.get("maxmem", vm_status["maxmem"])),
-                    "uptime": int(current_status.get("uptime", vm_status["uptime"])),
-                    "name": current_status.get("name", vm_status["name"]),
-                }
-            )
-        except Exception as exc:
-            vm_status["status_error"] = str(exc)
-
-        statuses[vmid] = vm_status
-
-    return statuses
-
-
-def format_vm_table(vm_statuses: Dict[int, Dict[str, object]]) -> pd.DataFrame:
-    rows = []
-    for vmid in sorted(vm_statuses):
-        vm = vm_statuses[vmid]
-        rows.append(
-            {
-                "VMID": vmid,
-                "Nom": vm.get("name") or f"VM {vmid}",
-                "Etat": vm.get("status", "unknown"),
-                "CPU %": round(float(vm.get("cpu", 0.0)) * 100, 2),
-                "RAM utilisee (GiB)": round(bytes_to_gib(int(vm.get("mem", 0))), 2),
-                "RAM max (GiB)": round(bytes_to_gib(int(vm.get("maxmem", 0))), 2),
-                "Uptime": format_uptime(int(vm.get("uptime", 0))),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def parse_network_config(config_value: str) -> Dict[str, str]:
-    parts = [part.strip() for part in config_value.split(",") if part.strip()]
-    parsed: Dict[str, str] = {}
-    for part in parts:
-        if "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        parsed[key] = value
-    return parsed
-
-
-def build_network_config(config: Dict[str, str]) -> str:
-    return ",".join(f"{key}={value}" for key, value in config.items())
-
-
-def get_net0_state(proxmox, node_name: str, vmid: int) -> Tuple[Optional[bool], str]:
-    config = proxmox.nodes(node_name).qemu(vmid).config.get()
-    net0 = config.get("net0")
-
-    if not net0:
-        return None, f"La VM {vmid} ne possede pas d'interface net0 configurable."
-
-    net0_config = parse_network_config(net0)
-    is_isolated = net0_config.get("link_down") == "1"
-    status_label = "isolee" if is_isolated else "connectee"
-    return is_isolated, f"Etat actuel de net0: {status_label}."
-
-
-def set_vm_network_state(proxmox, node_name: str, vmid: int, isolated: bool) -> Tuple[bool, str]:
-    config = proxmox.nodes(node_name).qemu(vmid).config.get()
-    net0 = config.get("net0")
-
-    if not net0:
-        return False, f"La VM {vmid} ne possede pas d'interface net0 configurable."
-
-    net0_config = parse_network_config(net0)
-    current_state = net0_config.get("link_down") == "1"
-
-    if isolated and current_state:
-        return True, f"La VM {vmid} est deja isolee sur net0."
-    if not isolated and not current_state:
-        return True, f"Le reseau de la VM {vmid} est deja actif sur net0."
-
-    if isolated:
-        net0_config["link_down"] = "1"
-        success_message = f"Isolation reseau appliquee a la VM {vmid} sur net0."
-    else:
-        net0_config.pop("link_down", None)
-        success_message = f"Reseau restaure pour la VM {vmid} sur net0."
-
-    updated_net0 = build_network_config(net0_config)
-    proxmox.nodes(node_name).qemu(vmid).config.put(net0=updated_net0)
-    return True, success_message
+    return labels.get(severity, severity)
 
 
 def ensure_session_state() -> None:
@@ -237,14 +86,16 @@ def ensure_session_state() -> None:
     st.session_state.setdefault("action_feedback", None)
     st.session_state.setdefault("selected_node", None)
     st.session_state.setdefault("selected_vmid", None)
+    st.session_state.setdefault("active_breaches", {})
+    st.session_state.setdefault("fired_alert_keys", set())
 
 
-def append_history(bucket_name: str, key: str, sample: Dict[str, object]) -> None:
+def append_history(settings: AppConfig, bucket_name: str, key: str, sample: Dict[str, object]) -> None:
     bucket = st.session_state[bucket_name]
     history = bucket.setdefault(key, [])
     history.append(sample)
-    if len(history) > MAX_HISTORY_POINTS:
-        del history[:-MAX_HISTORY_POINTS]
+    if len(history) > settings.max_history_points:
+        del history[:-settings.max_history_points]
 
 
 def history_frame(bucket_name: str, key: str) -> pd.DataFrame:
@@ -255,10 +106,11 @@ def history_frame(bucket_name: str, key: str) -> pd.DataFrame:
     return frame.set_index("timestamp")
 
 
-def capture_node_history(node_name: str, node_status: Dict[str, object]) -> None:
+def capture_node_history(settings: AppConfig, node_name: str, node_status: Dict[str, object]) -> None:
     memory = node_status.get("memory", {})
     swap = node_status.get("swap", {})
     append_history(
+        settings,
         "node_history",
         node_name,
         {
@@ -270,11 +122,12 @@ def capture_node_history(node_name: str, node_status: Dict[str, object]) -> None
     )
 
 
-def capture_vm_history(node_name: str, vm_statuses: Dict[int, Dict[str, object]]) -> None:
+def capture_vm_history(settings: AppConfig, node_name: str, vm_statuses: Dict[int, Dict[str, object]]) -> None:
     timestamp = datetime.now()
     for vmid, vm in vm_statuses.items():
         history_key = f"{node_name}:{vmid}"
         append_history(
+            settings,
             "vm_history",
             history_key,
             {
@@ -285,6 +138,39 @@ def capture_vm_history(node_name: str, vm_statuses: Dict[int, Dict[str, object]]
         )
 
 
+def persist_metrics(
+    settings: AppConfig,
+    node_name: str,
+    node_status: Dict[str, object],
+    vm_statuses: Dict[int, Dict[str, object]],
+    timestamp: datetime,
+) -> None:
+    insert_host_metric(settings.db_path, node_name, node_status, timestamp)
+    for vm in vm_statuses.values():
+        insert_vm_metric(settings.db_path, node_name, vm, timestamp)
+
+
+def format_vm_table(vm_statuses: Dict[int, Dict[str, object]]) -> pd.DataFrame:
+    rows = []
+    for vmid in sorted(vm_statuses):
+        vm = vm_statuses[vmid]
+        maxmem = int(vm.get("maxmem", 0))
+        mem = int(vm.get("mem", 0))
+        rows.append(
+            {
+                "VMID": vmid,
+                "Nom": vm.get("name") or f"VM {vmid}",
+                "Etat": vm.get("status", "unknown"),
+                "CPU %": round(float(vm.get("cpu", 0.0)) * 100, 2),
+                "RAM %": round(percent_ratio(mem, maxmem), 2),
+                "RAM utilisee (GiB)": round(bytes_to_gib(mem), 2),
+                "RAM max (GiB)": round(bytes_to_gib(maxmem), 2),
+                "Uptime": format_uptime(int(vm.get("uptime", 0))),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def render_line_chart(frame: pd.DataFrame, columns: List[str], height: int = 180) -> None:
     if frame.empty:
         st.caption("Historique en attente de donnees...")
@@ -292,103 +178,148 @@ def render_line_chart(frame: pd.DataFrame, columns: List[str], height: int = 180
     st.line_chart(frame[columns], height=height, use_container_width=True)
 
 
-def get_fragment_decorator(run_every: Optional[str]):
-    fragment_api = getattr(st, "fragment", None)
-    if fragment_api is None:
-        def passthrough(func):
-            return func
-        return passthrough
-    return fragment_api(run_every=run_every)
-
-
-st.set_page_config(page_title="Proxmox Sentinel - SOC Interface", page_icon="🛡️", layout="wide")
-
-st.markdown(
-    """
-    <style>
-    div.stButton > button[kind="primary"] {
-        background-color: #b91c1c;
-        border: 1px solid #991b1b;
-        color: white;
-    }
-    div.stButton > button[kind="primary"]:hover {
-        background-color: #991b1b;
-        color: white;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-ensure_session_state()
-
-st.title("🛡️ Proxmox Sentinel - SOC Interface")
-st.caption(
-    "Vue temps reel du serveur Proxmox, telemetry QEMU par VM, et reponse active "
-    "d'isolement/restauration reseau."
-)
-
-proxmox, connection_error = get_connection()
-
-with st.sidebar:
-    st.header("Etat de la plateforme")
-    if proxmox:
-        st.success("Connecte a l'API Proxmox")
-    else:
-        st.error(f"Erreur de connexion: {connection_error}")
-
-    verify_ssl = parse_bool(os.getenv("VERIFY_SSL"), default=False)
-    if not verify_ssl:
-        st.warning("VERIFY_SSL=False est adapte au lab, mais pas recommande en production.")
-
-if not proxmox:
-    st.info("Complete le fichier .env avec des identifiants API valides pour afficher le dashboard.")
-    st.stop()
-
-try:
-    nodes = fetch_nodes(proxmox)
-except Exception as exc:
-    st.error(f"Impossible de recuperer les noeuds Proxmox: {exc}")
-    st.stop()
-
-node_names = [node["node"] for node in nodes if node.get("node")]
-if not node_names:
-    st.warning("Aucun noeud Proxmox n'a ete retourne par l'API.")
-    st.stop()
-
-default_node = st.session_state["selected_node"]
-default_node_index = node_names.index(default_node) if default_node in node_names else 0
-
-refresh_options = {
-    "Manuel": None,
-    "5 secondes": "5s",
-    "10 secondes": "10s",
-    "30 secondes": "30s",
-}
-
-with st.sidebar:
-    selected_node = st.selectbox("Noeud", options=node_names, index=default_node_index)
-    refresh_label = st.selectbox("Rafraichissement", options=list(refresh_options.keys()), index=1)
-    if not hasattr(st, "fragment"):
-        st.info("La version de Streamlit ne supporte pas le rafraichissement automatique fragment.")
-
-st.session_state["selected_node"] = selected_node
-refresh_every = refresh_options[refresh_label]
-
-
-@get_fragment_decorator(refresh_every)
-def render_dashboard() -> None:
-    try:
-        node_status = fetch_node_status(proxmox, selected_node)
-        qemu_vms = fetch_qemu_vms(proxmox, selected_node)
-        vm_statuses = fetch_vm_statuses(proxmox, selected_node, qemu_vms)
-    except Exception as exc:
-        st.error(f"Impossible de charger les donnees du noeud {selected_node}: {exc}")
+def render_alert_banner(current_alerts: List[AlertCandidate]) -> None:
+    if not current_alerts:
+        st.success("Aucune alerte active selon les regles configurees.")
         return
 
-    capture_node_history(selected_node, node_status)
-    capture_vm_history(selected_node, vm_statuses)
+    for alert in current_alerts[:3]:
+        text = f"{severity_badge(alert.severity)} | score {alert.score}/100 | {alert.message}"
+        if alert.severity == "critical":
+            st.error(text)
+        elif alert.severity == "medium":
+            st.warning(text)
+        else:
+            st.info(text)
 
+
+def render_soc_metrics(settings: AppConfig) -> None:
+    metrics = fetch_soc_metrics(settings.db_path)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Alertes actives", metrics["active_alerts"])
+    col2.metric("Alertes total", metrics["total_alerts"])
+    col3.metric("Actions journalisees", metrics["total_actions"])
+    col4.metric("MTTD moyen", format_duration(metrics["avg_mttd"]))
+    st.caption(f"MTTR moyen observe: {format_duration(metrics['avg_mttr'])}")
+
+
+def format_alerts_dataframe(alerts: List[Dict[str, object]]) -> pd.DataFrame:
+    frame = pd.DataFrame(alerts)
+    if frame.empty:
+        return frame
+    frame = frame.rename(
+        columns={
+            "id": "ID",
+            "first_seen": "Detection",
+            "last_seen": "Derniere vue",
+            "resolved_at": "Resolution",
+            "node": "Noeud",
+            "vmid": "VMID",
+            "scope": "Portee",
+            "event_type": "Type",
+            "metric": "Metrique",
+            "value": "Valeur",
+            "threshold": "Seuil",
+            "severity": "Severite",
+            "score": "Score",
+            "status": "Statut",
+            "message": "Message",
+        }
+    )
+    return frame
+
+
+def format_actions_dataframe(actions: List[Dict[str, object]]) -> pd.DataFrame:
+    frame = pd.DataFrame(actions)
+    if frame.empty:
+        return frame
+    frame = frame.rename(
+        columns={
+            "id": "ID",
+            "timestamp": "Horodatage",
+            "node": "Noeud",
+            "vmid": "VMID",
+            "action": "Action",
+            "result": "Resultat",
+            "protected": "VM protegee",
+            "message": "Message",
+        }
+    )
+    return frame
+
+
+def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses: Dict[int, Dict[str, object]]) -> None:
+    render_soc_metrics(settings)
+    st.divider()
+
+    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+    node_filter = filter_col1.selectbox("Filtre noeud", options=["Tous", *node_names])
+    vm_choices = {"Toutes": None}
+    for vmid in sorted(vm_statuses):
+        vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
+    vm_filter_label = filter_col2.selectbox("Filtre VM", options=list(vm_choices.keys()))
+    severity_filter = filter_col3.selectbox("Severite", options=["Toutes", "critical", "medium", "low"])
+    status_filter = filter_col4.selectbox("Statut", options=["Tous", "active", "resolved"])
+
+    alerts = fetch_alerts(
+        settings.db_path,
+        node=node_filter,
+        vmid=vm_choices[vm_filter_label],
+        severity=severity_filter,
+        status=status_filter,
+    )
+    alerts_frame = format_alerts_dataframe(alerts)
+    if alerts_frame.empty:
+        st.info("Aucune alerte ne correspond aux filtres.")
+        return
+
+    st.dataframe(alerts_frame, use_container_width=True, hide_index=True)
+
+    alert_ids = [int(alert["id"]) for alert in alerts]
+    selected_alert_id = st.selectbox("Timeline incident", options=alert_ids)
+    selected_alert = next(alert for alert in alerts if int(alert["id"]) == selected_alert_id)
+    actions = fetch_actions(settings.db_path, limit=200)
+
+    timeline_rows = [
+        {
+            "Horodatage": selected_alert["first_seen"],
+            "Evenement": "Detection",
+            "Detail": selected_alert["message"],
+        }
+    ]
+    if selected_alert.get("resolved_at"):
+        timeline_rows.append(
+            {
+                "Horodatage": selected_alert["resolved_at"],
+                "Evenement": "Resolution metrique",
+                "Detail": "La condition d'alerte n'est plus observee.",
+            }
+        )
+
+    for action in actions:
+        same_node = action["node"] == selected_alert["node"]
+        same_vmid = action["vmid"] == selected_alert["vmid"]
+        after_detection = action["timestamp"] >= selected_alert["first_seen"]
+        if same_node and same_vmid and after_detection:
+            timeline_rows.append(
+                {
+                    "Horodatage": action["timestamp"],
+                    "Evenement": action["action"],
+                    "Detail": action["message"],
+                }
+            )
+
+    timeline_frame = pd.DataFrame(timeline_rows).sort_values("Horodatage")
+    st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
+
+
+def render_host_tab(
+    settings: AppConfig,
+    selected_node: str,
+    node_status: Dict[str, object],
+    vm_statuses: Dict[int, Dict[str, object]],
+    current_alerts: List[AlertCandidate],
+) -> None:
     node_history = history_frame("node_history", selected_node)
 
     st.subheader("Vue globale du serveur Proxmox")
@@ -423,10 +354,7 @@ def render_dashboard() -> None:
     with chart_swap:
         render_line_chart(node_history, ["SWAP utilisee (GiB)"])
 
-    if cpu_percent > 80:
-        st.error("⚠️ ANOMALIE DETECTEE : Surcharge CPU suspecte")
-    else:
-        st.success("Aucune anomalie CPU detectee sur le serveur Proxmox.")
+    render_alert_banner(current_alerts)
 
     st.divider()
     st.subheader("Inventaire QEMU")
@@ -437,42 +365,45 @@ def render_dashboard() -> None:
 
     st.subheader("Statistiques par VM QEMU")
     if not vm_statuses:
-        st.warning("Aucune VM disponible pour afficher une telemetry detaillee.")
-    else:
-        sorted_vmids = sorted(vm_statuses)
-        stored_vmid = st.session_state.get("selected_vmid")
-        if stored_vmid not in sorted_vmids:
-            stored_vmid = sorted_vmids[0]
-        st.session_state["selected_vmid"] = stored_vmid
+        st.warning("Aucune VM disponible pour afficher une telemetrie detaillee.")
+        return
 
-        for vmid in sorted_vmids:
-            vm = vm_statuses[vmid]
-            vm_history = history_frame("vm_history", f"{selected_node}:{vmid}")
-            vm_title = f"{vmid} - {vm.get('name') or f'VM {vmid}'}"
+    sorted_vmids = sorted(vm_statuses)
+    stored_vmid = st.session_state.get("selected_vmid")
+    if stored_vmid not in sorted_vmids:
+        stored_vmid = sorted_vmids[0]
+    st.session_state["selected_vmid"] = stored_vmid
 
-            with st.expander(vm_title, expanded=(vmid == stored_vmid)):
-                info_col1, info_col2, info_col3 = st.columns(3)
-                info_col1.metric("Etat", str(vm.get("status", "unknown")).upper())
-                info_col2.metric("CPU", f"{float(vm.get('cpu', 0.0)) * 100:.2f}%")
-                info_col3.metric(
-                    "RAM",
-                    format_used_total_gib(int(vm.get("mem", 0)), int(vm.get("maxmem", 0))),
-                    f"{percent_ratio(int(vm.get('mem', 0)), int(vm.get('maxmem', 0))):.1f}%",
-                )
+    for vmid in sorted_vmids:
+        vm = vm_statuses[vmid]
+        vm_history = history_frame("vm_history", f"{selected_node}:{vmid}")
+        vm_title = f"{vmid} - {vm.get('name') or f'VM {vmid}'}"
 
-                extra_left, extra_right = st.columns(2)
-                extra_left.caption(f"Uptime: {format_uptime(int(vm.get('uptime', 0)))}")
-                if vm.get("status_error"):
-                    extra_right.caption(f"Details API partiels: {vm['status_error']}")
+        with st.expander(vm_title, expanded=(vmid == stored_vmid)):
+            info_col1, info_col2, info_col3 = st.columns(3)
+            info_col1.metric("Etat", str(vm.get("status", "unknown")).upper())
+            info_col2.metric("CPU", f"{float(vm.get('cpu', 0.0)) * 100:.2f}%")
+            info_col3.metric(
+                "RAM",
+                format_used_total_gib(int(vm.get("mem", 0)), int(vm.get("maxmem", 0))),
+                f"{percent_ratio(int(vm.get('mem', 0)), int(vm.get('maxmem', 0))):.1f}%",
+            )
 
-                chart_left, chart_right = st.columns(2)
-                with chart_left:
-                    render_line_chart(vm_history, ["CPU %"], height=160)
-                with chart_right:
-                    render_line_chart(vm_history, ["RAM utilisee (GiB)"], height=160)
+            extra_left, extra_right = st.columns(2)
+            extra_left.caption(f"Uptime: {format_uptime(int(vm.get('uptime', 0)))}")
+            if vm.get("status_error"):
+                extra_right.caption(f"Details API partiels: {vm['status_error']}")
 
-    st.divider()
-    st.subheader("Reponse active")
+            chart_left, chart_right = st.columns(2)
+            with chart_left:
+                render_line_chart(vm_history, ["CPU %"], height=160)
+            with chart_right:
+                render_line_chart(vm_history, ["RAM utilisee (GiB)"], height=160)
+
+
+def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_statuses: Dict[int, Dict[str, object]]) -> None:
+    st.subheader("Reponse active human-in-the-loop")
+    st.caption("Perimetre volontaire du POC: VM QEMU uniquement, interface net0 uniquement.")
 
     if not vm_statuses:
         st.warning("Aucune VM disponible pour lancer une action d'isolement.")
@@ -482,7 +413,7 @@ def render_dashboard() -> None:
         f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}": vmid
         for vmid in sorted(vm_statuses)
     }
-    selected_vmid = st.selectbox(
+    selected_label = st.selectbox(
         "VM a isoler ou restaurer",
         options=list(vm_options.keys()),
         index=list(vm_options.values()).index(st.session_state["selected_vmid"])
@@ -490,57 +421,277 @@ def render_dashboard() -> None:
         else 0,
         key="vm_action_select",
     )
-    st.session_state["selected_vmid"] = vm_options[selected_vmid]
-    selected_vmid_value = st.session_state["selected_vmid"]
+    selected_vmid = vm_options[selected_label]
+    st.session_state["selected_vmid"] = selected_vmid
+    protected = is_protected_vmid(selected_vmid, settings.protected_vmids)
 
     action_feedback = st.session_state.get("action_feedback")
     if action_feedback:
         getattr(st, action_feedback["level"])(action_feedback["message"])
 
     try:
-        network_isolated, network_message = get_net0_state(proxmox, selected_node, selected_vmid_value)
+        network_state = get_net0_state(proxmox, selected_node, selected_vmid)
     except Exception as exc:
-        network_isolated, network_message = None, f"Impossible de lire l'etat de net0: {exc}"
+        network_state = None
+        st.error(f"Impossible de lire l'etat de net0: {exc}")
 
-    if network_isolated is True:
-        st.warning(network_message)
-    elif network_isolated is False:
-        st.info(network_message)
-    else:
-        st.error(network_message)
+    if network_state:
+        if network_state.isolated is True:
+            st.warning(network_state.message)
+        elif network_state.isolated is False:
+            st.info(network_state.message)
+        else:
+            st.error(network_state.message)
+
+    if protected:
+        st.warning("Cette VM est protegee par PROTECTED_VMIDS: l'isolement est bloque.")
+
+    confirm_key = f"confirm_isolate_{selected_node}_{selected_vmid}"
+    confirmed = st.checkbox(
+        f"Je confirme l'isolement reseau de la VM {selected_vmid} sur net0.",
+        key=confirm_key,
+        disabled=protected,
+    )
 
     isolate_col, restore_col = st.columns(2)
     action_result = None
 
+    can_isolate = bool(network_state and network_state.isolated is False and confirmed and not protected)
+    can_restore = bool(network_state and network_state.isolated is True)
+
     with isolate_col:
         if st.button(
-            "🔥 ISOLER (Couper reseau)",
+            "ISOLER (couper net0)",
             type="primary",
             use_container_width=True,
-            disabled=(network_isolated is not False),
+            disabled=not can_isolate,
         ):
-            try:
-                success, message = set_vm_network_state(proxmox, selected_node, selected_vmid_value, isolated=True)
-                action_result = ("success" if success else "error", message)
-            except Exception as exc:
-                action_result = ("error", f"Echec de l'action d'isolement sur la VM {selected_vmid_value}: {exc}")
+            if protected:
+                message = f"Isolation bloquee: VM {selected_vmid} protegee."
+                insert_action(settings.db_path, selected_node, selected_vmid, "isolate", "blocked", message, True)
+                action_result = ("error", message)
+            else:
+                try:
+                    success, message = set_vm_network_state(proxmox, selected_node, selected_vmid, isolated=True)
+                    result = "success" if success else "error"
+                    insert_action(settings.db_path, selected_node, selected_vmid, "isolate", result, message, protected)
+                    action_result = ("success" if success else "error", message)
+                except Exception as exc:
+                    message = f"Echec de l'isolement sur la VM {selected_vmid}: {exc}"
+                    insert_action(settings.db_path, selected_node, selected_vmid, "isolate", "error", message, protected)
+                    action_result = ("error", message)
 
     with restore_col:
         if st.button(
-            "🟢 RESTAURER LE RESEAU",
+            "RESTAURER LE RESEAU",
             use_container_width=True,
-            disabled=(network_isolated is not True),
+            disabled=not can_restore,
         ):
             try:
-                success, message = set_vm_network_state(proxmox, selected_node, selected_vmid_value, isolated=False)
+                success, message = set_vm_network_state(proxmox, selected_node, selected_vmid, isolated=False)
+                result = "success" if success else "error"
+                insert_action(settings.db_path, selected_node, selected_vmid, "restore", result, message, protected)
                 action_result = ("success" if success else "error", message)
             except Exception as exc:
-                action_result = ("error", f"Echec de la restauration reseau sur la VM {selected_vmid_value}: {exc}")
+                message = f"Echec de la restauration reseau sur la VM {selected_vmid}: {exc}"
+                insert_action(settings.db_path, selected_node, selected_vmid, "restore", "error", message, protected)
+                action_result = ("error", message)
 
     if action_result:
         level, message = action_result
         st.session_state["action_feedback"] = {"level": level, "message": message}
         st.rerun()
+
+    st.divider()
+    st.subheader("Journal d'audit recent")
+    actions_frame = format_actions_dataframe(fetch_actions(settings.db_path, limit=50))
+    if actions_frame.empty:
+        st.info("Aucune action journalisee pour le moment.")
+    else:
+        st.dataframe(actions_frame, use_container_width=True, hide_index=True)
+
+
+def render_audit_tab(settings: AppConfig) -> None:
+    st.subheader("Journal d'audit des actions")
+    actions_frame = format_actions_dataframe(fetch_actions(settings.db_path, limit=200))
+    if actions_frame.empty:
+        st.info("Aucune action de reponse active n'a encore ete journalisee.")
+    else:
+        st.dataframe(actions_frame, use_container_width=True, hide_index=True)
+
+
+def get_fragment_decorator(run_every: Optional[str]):
+    fragment_api = getattr(st, "fragment", None)
+    if fragment_api is None:
+        def passthrough(func):
+            return func
+        return passthrough
+    return fragment_api(run_every=run_every)
+
+
+@st.cache_resource(show_spinner=False)
+def cached_connect(host: str, user: str, token_id: str, token_secret: str, verify_ssl: bool):
+    return connect_proxmox_with_token(host, user, token_id, token_secret, verify_ssl)
+
+
+def get_connection(settings: AppConfig):
+    try:
+        return (
+            cached_connect(
+                settings.host,
+                settings.user,
+                settings.token_id,
+                settings.token_secret,
+                settings.verify_ssl,
+            ),
+            "",
+        )
+    except Exception as exc:
+        return None, str(exc)
+
+
+st.set_page_config(page_title="Proxmox Sentinel - SOC Interface", layout="wide")
+
+st.markdown(
+    """
+    <style>
+    div.stButton > button[kind="primary"] {
+        background-color: #b91c1c;
+        border: 1px solid #991b1b;
+        color: white;
+    }
+    div.stButton > button[kind="primary"]:hover {
+        background-color: #991b1b;
+        color: white;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+ensure_session_state()
+
+st.title("Proxmox Sentinel - SOC Interface")
+st.caption(
+    "Supervision Proxmox, detection comportementale explicable, persistence SQLite "
+    "et reponse active controlee par analyste."
+)
+
+try:
+    settings = read_settings()
+    init_db(settings.db_path)
+    settings_error = ""
+except Exception as exc:
+    settings = None
+    settings_error = str(exc)
+
+with st.sidebar:
+    st.header("Etat de la plateforme")
+    if settings is None:
+        st.error(f"Configuration invalide: {settings_error}")
+    else:
+        st.caption(f"Base SQLite: {settings.db_path}")
+        if not settings.verify_ssl:
+            st.warning("VERIFY_SSL=False est adapte au lab, pas a la production.")
+        if settings.protected_vmids:
+            protected_list = ", ".join(str(vmid) for vmid in sorted(settings.protected_vmids))
+            st.info(f"VM protegees: {protected_list}")
+
+if settings is None:
+    st.info("Complete le fichier .env avec des identifiants API valides pour afficher le dashboard.")
+    st.stop()
+
+proxmox, connection_error = get_connection(settings)
+
+with st.sidebar:
+    if proxmox:
+        st.success("Connecte a l'API Proxmox")
+    else:
+        st.error(f"Erreur de connexion: {connection_error}")
+
+if not proxmox:
+    st.stop()
+
+try:
+    nodes = fetch_nodes(proxmox)
+except Exception as exc:
+    st.error(f"Impossible de recuperer les noeuds Proxmox: {exc}")
+    st.stop()
+
+node_names = [node["node"] for node in nodes if node.get("node")]
+if not node_names:
+    st.warning("Aucun noeud Proxmox n'a ete retourne par l'API.")
+    st.stop()
+
+default_node = st.session_state["selected_node"]
+default_node_index = node_names.index(default_node) if default_node in node_names else 0
+
+refresh_options = {
+    "Manuel": None,
+    "5 secondes": "5s",
+    "10 secondes": "10s",
+    "30 secondes": "30s",
+}
+
+with st.sidebar:
+    selected_node = st.selectbox("Noeud", options=node_names, index=default_node_index)
+    refresh_label = st.selectbox("Rafraichissement", options=list(refresh_options.keys()), index=1)
+    st.divider()
+    st.caption("Regles actives")
+    st.write(f"CPU host: {settings.host_cpu_warn:.0f}% / {settings.host_cpu_critical:.0f}%")
+    st.write(f"CPU VM: {settings.vm_cpu_warn:.0f}% / {settings.vm_cpu_critical:.0f}%")
+    st.write(f"RAM VM: {settings.vm_ram_warn:.0f}% / {settings.vm_ram_critical:.0f}%")
+    st.write(f"Duree min: {settings.alert_min_duration_seconds}s")
+    if not hasattr(st, "fragment"):
+        st.info("Cette version de Streamlit ne supporte pas le rafraichissement automatique fragment.")
+
+st.session_state["selected_node"] = selected_node
+refresh_every = refresh_options[refresh_label]
+
+
+@get_fragment_decorator(refresh_every)
+def render_dashboard() -> None:
+    sample_time = datetime.now()
+    try:
+        node_status = fetch_node_status(proxmox, selected_node)
+        qemu_vms = fetch_qemu_vms(proxmox, selected_node)
+        vm_statuses = fetch_vm_statuses(proxmox, selected_node, qemu_vms)
+    except Exception as exc:
+        st.error(f"Impossible de charger les donnees du noeud {selected_node}: {exc}")
+        return
+
+    capture_node_history(settings, selected_node, node_status)
+    capture_vm_history(settings, selected_node, vm_statuses)
+    persist_metrics(settings, selected_node, node_status, vm_statuses, sample_time)
+
+    evaluation = evaluate_detection(
+        settings,
+        selected_node,
+        node_status,
+        vm_statuses,
+        st.session_state["active_breaches"],
+        st.session_state["fired_alert_keys"],
+        now=sample_time,
+    )
+    for alert in evaluation.current_alerts:
+        upsert_alert(settings.db_path, alert)
+    resolve_alerts_for_node(settings.db_path, selected_node, evaluation.active_keys, sample_time)
+
+    tab_supervision, tab_incidents, tab_response, tab_audit = st.tabs(
+        ["Supervision", "Incidents / Alertes", "Reponse active", "Audit"]
+    )
+
+    with tab_supervision:
+        render_host_tab(settings, selected_node, node_status, vm_statuses, evaluation.current_alerts)
+
+    with tab_incidents:
+        render_incidents_tab(settings, node_names, vm_statuses)
+
+    with tab_response:
+        render_response_tab(settings, proxmox, selected_node, vm_statuses)
+
+    with tab_audit:
+        render_audit_tab(settings)
 
 
 render_dashboard()
