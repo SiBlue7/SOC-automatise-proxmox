@@ -13,3 +13,17 @@ services:
     volumes:
       - ./data:/data
     restart: always
+
+  proxmox-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: proxmox-collector
+    command: ["python", "collector.py"]
+    env_file:
+      - .env
+    environment:
+      SOC_DB_PATH: ${SOC_DB_PATH:-/data/soc_dashboard.sqlite3}
+    volumes:
+      - ./data:/data
+    restart: always

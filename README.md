@@ -16,7 +16,8 @@ L'approche reste volontairement progressive :
 
 ## Architecture
 
-- `app.py` : interface Streamlit et orchestration SOC.
+- `app.py` : interface Streamlit, visualisation et reponse active.
+- `collector.py` : collecte continue indépendante du navigateur.
 - `config.py` : lecture et validation du `.env`.
 - `proxmox_client.py` : connexion API et collecte Proxmox.
 - `detection.py` : regles d'alertes, score et severite.
@@ -51,14 +52,26 @@ ALERT_VM_RAM_WARN=85
 ALERT_VM_RAM_CRITICAL=95
 ALERT_MIN_DURATION_SECONDS=0
 MAX_HISTORY_POINTS=30
+COLLECT_INTERVAL_SECONDS=5
+APP_PERSIST_ON_RENDER=False
+COLLECTOR_HEARTBEAT_SECONDS=30
 ```
 
 `PROTECTED_VMIDS` accepte une liste separee par virgules, par exemple `100,101`. Ces VM ne peuvent pas etre isolees depuis le dashboard.
+
+`COLLECT_INTERVAL_SECONDS` pilote la frequence de collecte du backend. `APP_PERSIST_ON_RENDER=False` evite que Streamlit double les ecritures du collecteur.
 
 ## Lancement Docker
 
 ```powershell
 docker compose up --build -d
+```
+
+Verifier les services :
+
+```powershell
+docker compose ps
+docker compose logs -f proxmox-collector
 ```
 
 Interface :
@@ -68,6 +81,8 @@ http://localhost:8501
 ```
 
 La base SQLite est montee dans `./data` via Docker Compose pour conserver les preuves apres redemarrage du conteneur.
+
+Le service `proxmox-collector` continue de collecter meme si aucune page Streamlit n'est ouverte. Le dashboard affiche son etat dans la sidebar.
 
 ## Fonctionnalites
 
@@ -92,17 +107,19 @@ La base SQLite est montee dans `./data` via Docker Compose pour conserver les pr
 
 ## Protocole experimental
 
-Scenario reproductible pour une demonstration de soutenance :
+Scenario reproductible pour une demonstration de soutenance avec collecte continue :
 
-1. Demarrer le dashboard et verifier l'etat normal du noeud.
-2. Selectionner une VM QEMU cible non protegee.
-3. Generer une charge CPU controlee sur la VM cible.
-4. Observer l'apparition de l'alerte dans `Supervision` puis `Incidents / Alertes`.
-5. Noter le score, la severite et l'horodatage de detection.
-6. Confirmer l'isolement dans `Reponse active`.
-7. Verifier que `net0` passe en etat isole.
-8. Restaurer le reseau.
-9. Utiliser la timeline et le journal d'audit comme preuve experimentale.
+1. Demarrer Docker Compose et verifier que `proxmox-collector` tourne.
+2. Laisser le collecteur tourner sans attaque pour obtenir une baseline.
+3. Ouvrir Streamlit pour controler l'etat du collecteur et les metriques.
+4. Selectionner une VM QEMU cible non protegee.
+5. Generer une charge CPU controlee sur la VM cible.
+6. Observer l'apparition de l'alerte dans `Supervision` puis `Incidents / Alertes`.
+7. Noter le score, la severite et l'horodatage de detection.
+8. Confirmer l'isolement dans `Reponse active` si le scenario le demande.
+9. Verifier que `net0` passe en etat isole.
+10. Restaurer le reseau.
+11. Utiliser la timeline et le journal d'audit comme preuve experimentale.
 
 Exemple Linux pour generer une charge CPU de demonstration dans une VM de test :
 
@@ -115,6 +132,16 @@ Arreter la charge :
 ```bash
 pkill yes
 ```
+
+Plan court de recolte :
+
+- Samedi soir : 3 a 4 heures de baseline et usage normal, sans attaque.
+- Nuit samedi/dimanche : 8 a 10 heures de baseline sans navigateur ouvert.
+- Dimanche : 5 charges CPU legitimes de 5 minutes, avec 10 minutes de pause.
+- Lundi en journee : collecte passive pendant les cours.
+- Lundi soir : 3 scans Nmap et 3 brute-force SSH controles depuis Kali.
+- Mardi en journee : collecte passive pendant les cours.
+- Mardi soir : 3 scenarios mixtes scan puis brute-force, avec 2 a 4 isolements/restaurations maximum.
 
 ## Justification academique
 

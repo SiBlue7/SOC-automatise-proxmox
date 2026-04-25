@@ -12,8 +12,10 @@ def iso_timestamp(value: datetime) -> str:
 
 @contextmanager
 def connect_db(db_path: str):
-    connection = sqlite3.connect(db_path)
+    connection = sqlite3.connect(db_path, timeout=30)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA busy_timeout = 30000")
+    connection.execute("PRAGMA foreign_keys = ON")
     try:
         yield connection
         connection.commit()
@@ -23,6 +25,7 @@ def connect_db(db_path: str):
 
 def init_db(db_path: str) -> None:
     with connect_db(db_path) as connection:
+        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS metrics (
@@ -79,10 +82,24 @@ def init_db(db_path: str) -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS collector_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                status TEXT NOT NULL,
+                nodes_seen INTEGER NOT NULL DEFAULT 0,
+                vm_count INTEGER NOT NULL DEFAULT 0,
+                alerts_seen INTEGER NOT NULL DEFAULT 0,
+                message TEXT NOT NULL
+            )
+            """
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_metrics_node_time ON metrics(node, timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_alerts_status_time ON alerts(status, first_seen)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_alerts_key_status ON alerts(alert_key, status)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_actions_time ON actions(timestamp)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_collector_runs_time ON collector_runs(timestamp)")
 
 
 def insert_host_metric(db_path: str, node: str, node_status: Dict[str, object], timestamp: datetime) -> None:
@@ -249,6 +266,46 @@ def insert_action(
             """,
             (iso_timestamp(event_time), node, vmid, action, result, int(protected), message),
         )
+
+
+def record_collector_run(
+    db_path: str,
+    status: str,
+    message: str,
+    nodes_seen: int = 0,
+    vm_count: int = 0,
+    alerts_seen: int = 0,
+    timestamp: Optional[datetime] = None,
+) -> None:
+    event_time = timestamp or datetime.now()
+    with connect_db(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO collector_runs (timestamp, status, nodes_seen, vm_count, alerts_seen, message)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                iso_timestamp(event_time),
+                status,
+                nodes_seen,
+                vm_count,
+                alerts_seen,
+                message,
+            ),
+        )
+
+
+def fetch_latest_collector_run(db_path: str) -> Optional[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id, timestamp, status, nodes_seen, vm_count, alerts_seen, message
+            FROM collector_runs
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> List[Dict[str, object]]:

@@ -17,6 +17,7 @@ from proxmox_client import (
 from storage import (
     fetch_actions,
     fetch_alerts,
+    fetch_latest_collector_run,
     fetch_soc_metrics,
     init_db,
     insert_action,
@@ -201,6 +202,41 @@ def render_soc_metrics(settings: AppConfig) -> None:
     col3.metric("Actions journalisees", metrics["total_actions"])
     col4.metric("MTTD moyen", format_duration(metrics["avg_mttd"]))
     st.caption(f"MTTR moyen observe: {format_duration(metrics['avg_mttr'])}")
+
+
+def render_collector_status(settings: AppConfig) -> None:
+    latest_run = fetch_latest_collector_run(settings.db_path)
+    if latest_run is None:
+        st.info("Collecteur: aucun cycle journalise.")
+        return
+
+    try:
+        last_seen = datetime.fromisoformat(str(latest_run["timestamp"]))
+        age_seconds = (datetime.now() - last_seen).total_seconds()
+    except ValueError:
+        st.warning("Collecteur: horodatage illisible.")
+        return
+
+    status = str(latest_run["status"])
+    message = str(latest_run["message"])
+    details = (
+        f"Dernier passage: {format_duration(age_seconds)} | "
+        f"noeuds={latest_run['nodes_seen']} vms={latest_run['vm_count']} "
+        f"alertes={latest_run['alerts_seen']}"
+    )
+
+    if status == "error":
+        st.error(f"Collecteur: erreur. {details}")
+        st.caption(message)
+    elif status == "warning":
+        st.warning(f"Collecteur: attention. {details}")
+        st.caption(message)
+    elif age_seconds <= settings.collector_heartbeat_seconds:
+        st.success(f"Collecteur: actif. {details}")
+    elif age_seconds <= settings.collector_heartbeat_seconds * 3:
+        st.warning(f"Collecteur: en retard. {details}")
+    else:
+        st.error(f"Collecteur: inactif ou bloque. {details}")
 
 
 def format_alerts_dataframe(alerts: List[Dict[str, object]]) -> pd.DataFrame:
@@ -596,6 +632,11 @@ with st.sidebar:
         if settings.protected_vmids:
             protected_list = ", ".join(str(vmid) for vmid in sorted(settings.protected_vmids))
             st.info(f"VM protegees: {protected_list}")
+        render_collector_status(settings)
+        if settings.app_persist_on_render:
+            st.warning("APP_PERSIST_ON_RENDER=True: Streamlit ecrit aussi les metriques.")
+        else:
+            st.caption("Persistance UI desactivee: collecte assuree par proxmox-collector.")
 
 if settings is None:
     st.info("Complete le fichier .env avec des identifiants API valides pour afficher le dashboard.")
@@ -662,7 +703,8 @@ def render_dashboard() -> None:
 
     capture_node_history(settings, selected_node, node_status)
     capture_vm_history(settings, selected_node, vm_statuses)
-    persist_metrics(settings, selected_node, node_status, vm_statuses, sample_time)
+    if settings.app_persist_on_render:
+        persist_metrics(settings, selected_node, node_status, vm_statuses, sample_time)
 
     evaluation = evaluate_detection(
         settings,
@@ -673,9 +715,10 @@ def render_dashboard() -> None:
         st.session_state["fired_alert_keys"],
         now=sample_time,
     )
-    for alert in evaluation.current_alerts:
-        upsert_alert(settings.db_path, alert)
-    resolve_alerts_for_node(settings.db_path, selected_node, evaluation.active_keys, sample_time)
+    if settings.app_persist_on_render:
+        for alert in evaluation.current_alerts:
+            upsert_alert(settings.db_path, alert)
+        resolve_alerts_for_node(settings.db_path, selected_node, evaluation.active_keys, sample_time)
 
     tab_supervision, tab_incidents, tab_response, tab_audit = st.tabs(
         ["Supervision", "Incidents / Alertes", "Reponse active", "Audit"]

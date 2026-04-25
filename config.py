@@ -22,6 +22,9 @@ class AppConfig:
     vm_ram_critical: float
     alert_min_duration_seconds: int
     max_history_points: int
+    collect_interval_seconds: int
+    app_persist_on_render: bool
+    collector_heartbeat_seconds: int
 
 
 def parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -125,4 +128,7 @@ def read_settings() -> AppConfig:
         vm_ram_critical=vm_ram_critical,
         alert_min_duration_seconds=parse_int_env("ALERT_MIN_DURATION_SECONDS", 0),
         max_history_points=parse_int_env("MAX_HISTORY_POINTS", 30, minimum=5),
+        collect_interval_seconds=parse_int_env("COLLECT_INTERVAL_SECONDS", 5, minimum=1),
+        app_persist_on_render=parse_bool(os.getenv("APP_PERSIST_ON_RENDER"), default=False),
+        collector_heartbeat_seconds=parse_int_env("COLLECTOR_HEARTBEAT_SECONDS", 30, minimum=5),
     )
