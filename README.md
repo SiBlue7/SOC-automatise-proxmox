@@ -143,6 +143,47 @@ Plan court de recolte :
 - Mardi en journee : collecte passive pendant les cours.
 - Mardi soir : 3 scenarios mixtes scan puis brute-force, avec 2 a 4 isolements/restaurations maximum.
 
+## Analyse des donnees
+
+Le fichier `experiment_log.csv` sert a documenter manuellement les fenetres de test. Il permet de relier les metriques SQLite a la verite terrain : baseline, charge legitime, scan Nmap, brute-force SSH, scenario mixte.
+
+Colonnes importantes :
+
+- `start_time` / `end_time` : fenetre temporelle ISO, par exemple `2026-04-26T12:32:00`.
+- `scenario` : `baseline`, `cpu_legitimate`, `nmap`, `hydra` ou `mixed`.
+- `vmid` : VM cible observee.
+- `is_malicious` : `true` pour une attaque simulee, `false` pour une activite normale.
+- `observed_alert` : `true` si le SOC a declenche une alerte pendant la fenetre.
+
+Generer les figures :
+
+```powershell
+python analysis/generate_figures.py --db data/soc_dashboard.sqlite3 --log experiment_log.csv --out analysis_output
+```
+
+Ou via Docker, sans installer Python/Matplotlib sur l'hote :
+
+```powershell
+docker compose up -d --build
+docker compose run --rm proxmox-soc python analysis/generate_figures.py --db /data/soc_dashboard.sqlite3 --log experiment_log.csv --out analysis_output
+```
+
+Forcer une VM cible precise :
+
+```powershell
+python analysis/generate_figures.py --db data/soc_dashboard.sqlite3 --log experiment_log.csv --out analysis_output --vmid 103
+```
+
+Sorties :
+
+- `analysis_output/01_cpu_timeline.png` : CPU VM avec fenetres experimentales.
+- `analysis_output/02_alerts_timeline.png` : alertes par score et severite.
+- `analysis_output/03_alerts_by_scenario.png` : alertes par scenario.
+- `analysis_output/04_confusion_matrix.png` : vrais positifs, faux positifs, vrais negatifs, faux negatifs.
+- `analysis_output/05_mttd_mttr.png` : delais detection/reponse.
+- `analysis_output/06_cpu_normal_vs_attack.png` : distribution CPU par scenario.
+- `analysis_output/summary_results.md` : synthese prete a reprendre dans le memoire.
+
 ## Justification academique
 
 - Pitkar (2025) soutient l'interet de l'automatisation pour coordonner detection et reponse dans des environnements cloud.

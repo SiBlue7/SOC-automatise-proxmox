@@ -12,6 +12,8 @@ services:
       - "8501:8501"
     volumes:
       - ./data:/data
+      - ./experiment_log.csv:/app/experiment_log.csv:ro
+      - ./analysis_output:/app/analysis_output
     restart: always
 
   proxmox-collector:

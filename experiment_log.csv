@@ -1,0 +1,17 @@
+start_time,end_time,scenario,label,vmid,target_ip,is_malicious,expected_alert,observed_alert,notes
+2026-04-25T19:50:00,2026-04-25T22:00:00,baseline,normal_ssh_maintenance,103,192.168.1.139,false,false,false,Connexion SSH normale apt update installation htop commandes free uptime df aucune alerte
+2026-04-25T22:00:00,2026-04-26T09:00:00,baseline,overnight_passive_collection,103,192.168.1.139,false,false,false,Collecte passive de nuit OK 63432 metriques 0 alertes
+2026-04-26T10:20:00,2026-04-26T11:00:00,baseline,normal_system_maintenance,103,192.168.1.139,false,false,false,apt update installation htop retour au calme aucune attaque
+2026-04-26T14:05:00,2026-04-26T14:20:00,baseline,normal_commands,103,192.168.1.139,false,false,false,Usage normal avec free uptime df
+2026-04-26T14:29:00,2026-04-26T14:34:00,cpu_legitimate,cpu_test_1,103,192.168.1.139,false,true,true,Charge CPU legitime controlee faux positif attendu
+2026-04-26T14:44:00,2026-04-26T14:49:00,cpu_legitimate,cpu_test_2,103,192.168.1.139,false,true,true,Charge CPU legitime controlee faux positif attendu
+2026-04-26T14:59:00,2026-04-26T15:04:00,cpu_legitimate,cpu_test_3,103,192.168.1.139,false,true,true,Charge CPU legitime controlee faux positif attendu
+2026-04-26T15:14:00,2026-04-26T15:19:00,cpu_legitimate,cpu_test_4,103,192.168.1.139,false,true,true,Charge CPU legitime controlee faux positif attendu
+2026-04-26T15:29:00,2026-04-26T15:34:00,cpu_legitimate,cpu_test_5,103,192.168.1.139,false,true,true,Charge CPU legitime controlee faux positif attendu 5 alertes total dont 4 critical et 1 medium resolved
+2026-04-28T08:00:00,2026-04-28T18:00:00,baseline,passive_collection_day,103,192.168.1.139,false,false,false,Collecte passive sans attaque 260096 metriques et 5 alertes cumulees
+2026-04-29T09:11:00,2026-04-29T09:13:00,nmap,fast_scan,103,192.168.1.139,true,true,false,nmap -Pn -sS -F depuis Exegol aucune alerte
+2026-04-29T09:21:00,2026-04-29T09:23:00,nmap,service_scan,103,192.168.1.139,true,true,false,nmap -Pn -sT -sV ports 22 80 443 8080 aucune alerte
+2026-04-29T09:31:00,2026-04-29T09:35:00,nmap,ports_1_1000_scan,103,192.168.1.139,true,true,false,nmap -Pn -sT ports 1-1000 aucune alerte
+2026-04-29T09:41:00,2026-04-29T09:45:00,hydra,ssh_bruteforce_small,103,192.168.1.139,true,true,false,Hydra demo-user avec 10 mots de passe faux aucune alerte CPU RAM
+2026-04-29T10:25:00,2026-04-29T10:32:00,mixed,scan_hydra_light,103,192.168.1.139,true,true,false,nmap service scan puis hydra leger aucune alerte
+2026-04-29T10:37:00,2026-04-29T10:45:00,mixed,scan_hydra_cpu_forced,103,192.168.1.139,true,true,true,nmap large hydra passwords_30 et charge CPU yes pour declencher une alerte et tester la reponse active
