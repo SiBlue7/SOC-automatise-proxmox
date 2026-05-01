@@ -26,6 +26,7 @@ SCENARIO_COLORS = {
     "pause": "#f3f4f6",
     "response": "#dcfce7",
 }
+FILENAME_PREFIX = ""
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,11 +40,20 @@ def parse_args() -> argparse.Namespace:
         default="Europe/Paris",
         help="Timezone used by start_time/end_time in experiment_log.csv. Use UTC to disable conversion.",
     )
+    parser.add_argument(
+        "--filename-prefix",
+        default="",
+        help="Optional prefix added to every generated file, for example 2026-05-01_syslog_.",
+    )
     return parser.parse_args()
 
 
 def ensure_output_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
+
+
+def output_file(out: Path, filename: str, prefix: str = "") -> Path:
+    return out / f"{prefix}{filename}"
 
 
 def read_table(db_path: Path, table_name: str) -> pd.DataFrame:
@@ -193,7 +203,7 @@ def filter_alerts_for_vmid(alerts: pd.DataFrame, vmid: Optional[int]) -> pd.Data
 
 
 def figure_cpu_timeline(metrics: pd.DataFrame, alerts: pd.DataFrame, experiments: pd.DataFrame, vmid: Optional[int], out: Path) -> None:
-    output_path = out / "01_cpu_timeline.png"
+    output_path = output_file(out, "01_cpu_timeline.png", FILENAME_PREFIX)
     if metrics.empty or vmid is None:
         save_placeholder(output_path, "Timeline CPU", "Aucune metrique VM disponible.")
         return
@@ -232,7 +242,7 @@ def figure_cpu_timeline(metrics: pd.DataFrame, alerts: pd.DataFrame, experiments
 
 
 def figure_alerts_timeline(alerts: pd.DataFrame, out: Path) -> None:
-    output_path = out / "02_alerts_timeline.png"
+    output_path = output_file(out, "02_alerts_timeline.png", FILENAME_PREFIX)
     if alerts.empty:
         save_placeholder(output_path, "Timeline des alertes", "Aucune alerte presente dans SQLite.")
         return
@@ -286,7 +296,7 @@ def enrich_experiments(experiments: pd.DataFrame, alerts: pd.DataFrame) -> pd.Da
 
 
 def figure_alerts_by_scenario(experiments: pd.DataFrame, alerts: pd.DataFrame, out: Path) -> None:
-    output_path = out / "03_alerts_by_scenario.png"
+    output_path = output_file(out, "03_alerts_by_scenario.png", FILENAME_PREFIX)
     enriched = enrich_experiments(experiments, alerts)
     if enriched.empty:
         if alerts.empty:
@@ -331,7 +341,7 @@ def confusion_counts(experiments: pd.DataFrame, alerts: pd.DataFrame) -> Dict[st
 
 
 def figure_confusion_matrix(experiments: pd.DataFrame, alerts: pd.DataFrame, out: Path) -> None:
-    output_path = out / "04_confusion_matrix.png"
+    output_path = output_file(out, "04_confusion_matrix.png", FILENAME_PREFIX)
     if experiments.empty:
         save_placeholder(output_path, "Matrice de classification", "Renseigner experiment_log.csv pour classer TP/FP/TN/FN.")
         return
@@ -382,7 +392,7 @@ def compute_mttd_mttr(alerts: pd.DataFrame, actions: pd.DataFrame) -> pd.DataFra
 
 
 def figure_mttd_mttr(alerts: pd.DataFrame, actions: pd.DataFrame, out: Path) -> None:
-    output_path = out / "05_mttd_mttr.png"
+    output_path = output_file(out, "05_mttd_mttr.png", FILENAME_PREFIX)
     data = compute_mttd_mttr(alerts, actions)
     if data.empty or data[["mttd_seconds", "mttr_seconds"]].dropna(how="all").empty:
         save_placeholder(output_path, "MTTD / MTTR", "Aucun delai calculable sans alertes ou actions associees.")
@@ -401,7 +411,7 @@ def figure_mttd_mttr(alerts: pd.DataFrame, actions: pd.DataFrame, out: Path) -> 
 
 
 def figure_cpu_distribution(metrics: pd.DataFrame, experiments: pd.DataFrame, vmid: Optional[int], out: Path) -> None:
-    output_path = out / "06_cpu_normal_vs_attack.png"
+    output_path = output_file(out, "06_cpu_normal_vs_attack.png", FILENAME_PREFIX)
     if metrics.empty or experiments.empty or vmid is None:
         save_placeholder(output_path, "Distribution CPU par scenario", "Metriques et experiment_log.csv requis.")
         return
@@ -441,7 +451,7 @@ def figure_cpu_distribution(metrics: pd.DataFrame, experiments: pd.DataFrame, vm
 
 
 def figure_ssh_events_timeline(ssh_events: pd.DataFrame, alerts: pd.DataFrame, out: Path) -> None:
-    output_path = out / "07_ssh_events_timeline.png"
+    output_path = output_file(out, "07_ssh_events_timeline.png", FILENAME_PREFIX)
     if ssh_events.empty:
         save_placeholder(output_path, "Timeline SSH", "Aucun evenement SSH collecte.")
         return
@@ -566,15 +576,17 @@ def write_summary(
         ]
     )
 
-    (out / "summary_results.md").write_text("\n".join(lines), encoding="utf-8")
+    output_file(out, "summary_results.md", FILENAME_PREFIX).write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> None:
+    global FILENAME_PREFIX
     args = parse_args()
     db_path = Path(args.db)
     log_path = Path(args.log)
     output_dir = Path(args.out)
     ensure_output_dir(output_dir)
+    FILENAME_PREFIX = args.filename_prefix
 
     metrics, alerts, actions, ssh_events, experiments = load_data(db_path, log_path, args.experiment_timezone)
     vmid = choose_vmid(metrics, experiments, args.vmid)
@@ -589,7 +601,7 @@ def main() -> None:
     write_summary(output_dir, metrics, alerts, actions, ssh_events, experiments, vmid)
 
     print(f"Figures generated in {output_dir.resolve()}")
-    print(f"Summary generated at {(output_dir / 'summary_results.md').resolve()}")
+    print(f"Summary generated at {output_file(output_dir, 'summary_results.md', FILENAME_PREFIX).resolve()}")
 
 
 if __name__ == "__main__":

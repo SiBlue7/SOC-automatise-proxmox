@@ -209,6 +209,12 @@ docker compose up -d --build
 docker compose run --rm proxmox-soc python analysis/generate_figures.py --db /data/soc_dashboard.sqlite3 --log experiment_log.csv --out analysis_output
 ```
 
+Pour distinguer la campagne Syslog du jour des premieres figures, ajoute un prefixe date :
+
+```powershell
+docker compose run --rm proxmox-soc python analysis/generate_figures.py --db /data/soc_dashboard.sqlite3 --log experiment_log.csv --out analysis_output --vmid 103 --filename-prefix 2026-05-01_syslog_
+```
+
 Forcer une VM cible precise :
 
 ```powershell
