@@ -87,6 +87,46 @@ def severity_badge(severity: str) -> str:
     return labels.get(severity, severity)
 
 
+INCIDENT_STATUS_LABELS = {
+    "open": "Nouveau",
+    "acknowledged": "Pris en charge",
+    "contained": "Contenu",
+    "resolved": "Clos",
+}
+
+INCIDENT_STATUS_VALUES = {label: value for value, label in INCIDENT_STATUS_LABELS.items()}
+
+
+def incident_status_label(status: str) -> str:
+    return INCIDENT_STATUS_LABELS.get(status, status)
+
+
+def incident_next_step(status: str) -> Dict[str, str]:
+    steps = {
+        "open": {
+            "label": "Prendre en charge",
+            "target": "acknowledged",
+            "message": "Incident detecte automatiquement. L'etape suivante est de confirmer qu'il est vu par l'analyste.",
+        },
+        "acknowledged": {
+            "label": "Marquer comme contenu",
+            "target": "contained",
+            "message": "Incident pris en compte. Marque-le comme contenu apres une isolation, un blocage ou une decision de confinement.",
+        },
+        "contained": {
+            "label": "Clore l'incident",
+            "target": "resolved",
+            "message": "Incident contenu. Cloture-le quand les alertes sont resolues et que la situation est revenue au calme.",
+        },
+        "resolved": {
+            "label": "Reouvrir",
+            "target": "open",
+            "message": "Incident clos. Reouvre-le seulement si une nouvelle analyse montre que le traitement doit continuer.",
+        },
+    }
+    return steps.get(status, steps["open"])
+
+
 def ensure_session_state() -> None:
     st.session_state.setdefault("node_history", {})
     st.session_state.setdefault("vm_history", {})
@@ -325,6 +365,8 @@ def format_incidents_dataframe(incidents: List[Dict[str, object]]) -> pd.DataFra
     frame = pd.DataFrame(incidents)
     if frame.empty:
         return frame
+    frame["status"] = frame["status"].map(incident_status_label)
+    frame["severity"] = frame["severity"].map(severity_badge)
     frame = frame.rename(
         columns={
             "id": "ID",
@@ -399,10 +441,11 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
         vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
     vm_filter_label = filter_col2.selectbox("Filtre VM", options=list(vm_choices.keys()))
     severity_filter = filter_col3.selectbox("Severite", options=["Toutes", "critical", "medium", "low"])
-    incident_status_filter = filter_col4.selectbox(
+    incident_status_label_filter = filter_col4.selectbox(
         "Statut incident",
-        options=["Tous", "open", "acknowledged", "contained", "resolved"],
+        options=["Tous", *INCIDENT_STATUS_VALUES.keys()],
     )
+    incident_status_filter = INCIDENT_STATUS_VALUES.get(incident_status_label_filter)
     status_filter = filter_col5.selectbox("Statut alerte", options=["Tous", "active", "resolved"])
 
     incidents = fetch_incidents(
@@ -419,26 +462,37 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
     else:
         st.dataframe(incidents_frame, use_container_width=True, hide_index=True)
         incident_ids = [int(incident["id"]) for incident in incidents]
-        selected_incident_id = st.selectbox("Timeline incident correle", options=incident_ids)
+        selected_incident_id = st.selectbox("Incident a analyser", options=incident_ids)
         selected_incident = next(incident for incident in incidents if int(incident["id"]) == selected_incident_id)
 
-        st.caption(f"Statut courant: {selected_incident['status']} | {selected_incident['summary']}")
-        status_col1, status_col2, status_col3, status_col4 = st.columns(4)
-        status_actions = [
-            (status_col1, "Reouvrir", "open"),
-            (status_col2, "Acquitter", "acknowledged"),
-            (status_col3, "Contenir", "contained"),
-            (status_col4, "Resoudre", "resolved"),
-        ]
-        for column, label, target_status in status_actions:
-            with column:
+        detail_col1, detail_col2, detail_col3, detail_col4 = st.columns(4)
+        detail_col1.metric("Statut", incident_status_label(str(selected_incident["status"])))
+        detail_col2.metric("Severite", severity_badge(str(selected_incident["severity"])))
+        detail_col3.metric("Score", selected_incident["score"])
+        detail_col4.metric("Categorie", selected_incident["category"])
+
+        st.info(str(selected_incident["summary"]))
+        next_step = incident_next_step(str(selected_incident["status"]))
+        st.caption(next_step["message"])
+
+        action_col, secondary_col = st.columns([2, 1])
+        with action_col:
+            if st.button(
+                next_step["label"],
+                type="primary" if selected_incident["status"] != "resolved" else "secondary",
+                use_container_width=True,
+                key=f"incident_next_{selected_incident_id}_{next_step['target']}",
+            ):
+                update_incident_status(settings.db_path, selected_incident_id, next_step["target"])
+                st.rerun()
+        with secondary_col:
+            if selected_incident["status"] in {"acknowledged", "contained"}:
                 if st.button(
-                    label,
+                    "Revenir a nouveau",
                     use_container_width=True,
-                    disabled=selected_incident["status"] == target_status,
-                    key=f"incident_status_{selected_incident_id}_{target_status}",
+                    key=f"incident_back_open_{selected_incident_id}",
                 ):
-                    update_incident_status(settings.db_path, selected_incident_id, target_status)
+                    update_incident_status(settings.db_path, selected_incident_id, "open")
                     st.rerun()
 
         timeline = fetch_incident_timeline(settings.db_path, selected_incident_id)

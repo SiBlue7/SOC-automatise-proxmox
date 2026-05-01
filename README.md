@@ -156,7 +156,7 @@ Le service `proxmox-collector` continue de collecter meme si aucune page Streaml
   - duree minimale avant alerte ;
   - score d'anomalie et severite faible/moyen/critique.
 - Vue `Incidents / Alertes` :
-  - incidents correles avec statuts `open`, `acknowledged`, `contained`, `resolved` ;
+  - incidents correles avec statuts analyste `Nouveau`, `Pris en charge`, `Contenu`, `Clos` ;
   - filtres par noeud, VM, severite et statut ;
   - timeline d'incident ;
   - indicateurs MTTD, MTTR, volume d'alertes et actions.
@@ -182,12 +182,12 @@ Le moteur d'incidents regroupe les alertes proches dans un objet exploitable par
 - `resource_pressure` : pression CPU/RAM sur une VM.
 - `host_pressure` : pression ressources sur le noeud Proxmox.
 
-Les incidents sont crees automatiquement par `proxmox-collector`, puis visibles dans `Incidents / Alertes`. L'analyste peut les passer en :
+Les incidents sont crees automatiquement par `proxmox-collector`, puis visibles dans `Incidents / Alertes`. Les alertes techniques se resolvent automatiquement quand les conditions disparaissent. Le changement de statut manuel sert surtout a tracer la decision humaine :
 
-- `open` : incident detecte, pas encore traite ;
-- `acknowledged` : incident vu et pris en compte ;
-- `contained` : action de confinement realisee ou en cours ;
-- `resolved` : incident clos.
+- `Nouveau` : incident detecte, pas encore traite ;
+- `Pris en charge` : incident vu et pris en compte ;
+- `Contenu` : action de confinement realisee ou en cours ;
+- `Clos` : incident ferme apres retour au calme.
 
 Cette couche reduit la surcharge analyste : plusieurs alertes techniques peuvent etre lues comme un seul incident coherent.
 
@@ -204,10 +204,10 @@ Scenario reproductible pour une demonstration de soutenance avec collecte contin
 7. Lancer un brute-force SSH controle pour verifier la correlation Syslog.
 8. Noter le score, la severite et l'horodatage de detection.
 9. Verifier la creation d'un incident `ssh_intrusion`.
-10. Passer l'incident en `acknowledged`.
+10. Passer l'incident en `Pris en charge`.
 11. Confirmer l'isolement dans `Reponse active` si le scenario le demande.
-12. Passer l'incident en `contained`, verifier que `net0` passe en etat isole.
-13. Restaurer le reseau, puis passer l'incident en `resolved`.
+12. Passer l'incident en `Contenu`, verifier que `net0` passe en etat isole.
+13. Restaurer le reseau, puis passer l'incident en `Clos`.
 14. Utiliser la timeline, les logs SSH et le journal d'audit comme preuve experimentale.
 
 Exemple Linux pour generer une charge CPU de demonstration dans une VM de test :
