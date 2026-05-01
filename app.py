@@ -227,6 +227,20 @@ def css_for_theme(theme: str) -> str:
         font-size: 13px;
         line-height: 1.35;
     }}
+    [data-testid="stSidebar"] [role="radiogroup"] {{
+        gap: 6px;
+    }}
+    [data-testid="stSidebar"] [role="radiogroup"] label {{
+        background: var(--soc-surface-alt);
+        border: 1px solid var(--soc-border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin: 0 0 6px 0;
+    }}
+    [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
+        background: var(--soc-primary-soft);
+        border-color: var(--soc-primary);
+    }}
     div[data-testid="stMetric"] {{
         background: var(--soc-surface);
         border: 1px solid var(--soc-border);
@@ -541,6 +555,8 @@ def incident_next_step(status: str) -> Dict[str, str]:
 
 def ensure_session_state() -> None:
     st.session_state.setdefault("theme", "Sombre")
+    st.session_state.setdefault("navigation", "Vue SOC")
+    st.session_state.setdefault("refresh_label", "5 secondes")
     st.session_state.setdefault("node_history", {})
     st.session_state.setdefault("vm_history", {})
     st.session_state.setdefault("action_feedback", None)
@@ -888,6 +904,165 @@ def render_syslog_status(settings: AppConfig) -> None:
     else:
         st.success(f"Syslog: en ecoute. {details}")
         st.caption("Aucun evenement Syslog SSH recu pour le moment.")
+
+
+def render_platform_tab(
+    settings: AppConfig,
+    proxmox,
+    connection_error: str,
+    node_names: List[str],
+    refresh_options: Dict[str, Optional[str]],
+) -> None:
+    render_section(
+        "Plateforme",
+        "Configuration d'exploitation, etat des collecteurs et regles de detection actives.",
+    )
+
+    if st.session_state.get("refresh_label") not in refresh_options:
+        st.session_state["refresh_label"] = "5 secondes"
+    if node_names and st.session_state.get("selected_node") not in node_names:
+        st.session_state["selected_node"] = node_names[0]
+
+    settings_cols = st.columns([1, 1, 1])
+    with settings_cols[0]:
+        if node_names:
+            st.selectbox("Noeud Proxmox actif", options=node_names, key="selected_node")
+        else:
+            st.info("Aucun noeud Proxmox disponible pour le moment.")
+    with settings_cols[1]:
+        st.selectbox("Rafraichissement interface", options=list(refresh_options.keys()), key="refresh_label")
+    with settings_cols[2]:
+        st.radio("Theme interface", options=["Sombre", "Clair"], key="theme", horizontal=True)
+
+    if not hasattr(st, "fragment"):
+        st.info("Cette version de Streamlit ne supporte pas le rafraichissement automatique fragment.")
+
+    st.divider()
+    render_section("Etat des services", "Sante technique du POC et des flux de collecte.")
+    service_cols = st.columns(3)
+    with service_cols[0]:
+        render_kpi_card(
+            "API Proxmox",
+            "Connectee" if proxmox else "Erreur",
+            "" if proxmox else connection_error,
+            "success" if proxmox else "danger",
+        )
+    with service_cols[1]:
+        render_kpi_card(
+            "Mode SSL",
+            "Verification active" if settings.verify_ssl else "Lab sans verification",
+            "VERIFY_SSL=False reste reserve au lab." if not settings.verify_ssl else "Configuration durcie.",
+            "success" if settings.verify_ssl else "warning",
+        )
+    with service_cols[2]:
+        render_kpi_card(
+            "Persistance",
+            "Collecteur" if not settings.app_persist_on_render else "UI + collecteur",
+            "SQLite alimente par le backend continu."
+            if not settings.app_persist_on_render
+            else "Streamlit persiste aussi au rendu.",
+            "success" if not settings.app_persist_on_render else "warning",
+        )
+
+    collector_col, syslog_col = st.columns(2)
+    with collector_col:
+        render_section("Collecteur Proxmox", "Collecte continue des metriques hote et VM.")
+        render_collector_status(settings)
+        st.caption(f"Intervalle configure: {settings.collect_interval_seconds}s")
+    with syslog_col:
+        render_section("Collecteur Syslog", "Reception centralisee des evenements SSH/auth.")
+        render_syslog_status(settings)
+        protocols = ", ".join(sorted(settings.syslog_protocols))
+        st.caption(f"Ecoute: {settings.syslog_bind_host}:{settings.syslog_port} ({protocols})")
+
+    st.divider()
+    render_section("Sources surveillees", "Mapping des VM et protections appliquees avant action active.")
+    source_cols = st.columns(2)
+    with source_cols[0]:
+        if settings.syslog_vm_map:
+            syslog_rows = [
+                {
+                    "VMID": mapping.vmid,
+                    "IP / host": mapping.host,
+                    "Nom": mapping.name,
+                    "Noeud": mapping.node,
+                }
+                for mapping in settings.syslog_vm_map
+            ]
+            st.dataframe(pd.DataFrame(syslog_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("Aucun mapping SYSLOG_VM_MAP configure.")
+    with source_cols[1]:
+        protected = ", ".join(str(vmid) for vmid in sorted(settings.protected_vmids)) or "Aucune"
+        render_kpi_card("VM protegees", protected, "Ces VM ne peuvent pas etre isolees depuis l'interface.", "info")
+        if settings.ssh_log_targets:
+            fallback_rows = [
+                {
+                    "VMID": target.vmid,
+                    "IP / host": target.host,
+                    "Utilisateur": target.user,
+                    "Log": target.log_path,
+                }
+                for target in settings.ssh_log_targets
+            ]
+            st.dataframe(pd.DataFrame(fallback_rows), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Fallback SSH desactive: collecte perenne assuree par Syslog.")
+
+    st.divider()
+    render_section("Regles de detection", "Seuils explicables utilises pour prioriser les alertes.")
+    rule_cols = st.columns(4)
+    with rule_cols[0]:
+        render_kpi_card(
+            "CPU hote",
+            f"{settings.host_cpu_warn:.0f}% / {settings.host_cpu_critical:.0f}%",
+            "warning / critical",
+            "warning",
+        )
+    with rule_cols[1]:
+        render_kpi_card(
+            "CPU VM",
+            f"{settings.vm_cpu_warn:.0f}% / {settings.vm_cpu_critical:.0f}%",
+            "pression ressource VM",
+            "warning",
+        )
+    with rule_cols[2]:
+        render_kpi_card(
+            "RAM VM",
+            f"{settings.vm_ram_warn:.0f}% / {settings.vm_ram_critical:.0f}%",
+            "pression memoire VM",
+            "warning",
+        )
+    with rule_cols[3]:
+        render_kpi_card(
+            "SSH",
+            f"{settings.ssh_auth_failure_warn} / {settings.ssh_auth_failure_critical}",
+            "echecs warning / critical",
+            "info",
+        )
+
+    correlation_cols = st.columns(3)
+    with correlation_cols[0]:
+        render_kpi_card(
+            "Correlation",
+            f"{settings.ssh_correlation_window_seconds}s",
+            "fenetre SSH + CPU",
+            "info",
+        )
+    with correlation_cols[1]:
+        render_kpi_card(
+            "CPU correlation",
+            f"{settings.ssh_correlation_cpu_threshold:.0f}%",
+            "seuil de renforcement SSH",
+            "info",
+        )
+    with correlation_cols[2]:
+        render_kpi_card(
+            "Duree minimale",
+            f"{settings.alert_min_duration_seconds}s",
+            "avant ouverture d'alerte",
+            "neutral",
+        )
 
 
 def format_alerts_dataframe(alerts: List[Dict[str, object]]) -> pd.DataFrame:
@@ -1409,13 +1584,25 @@ st.set_page_config(page_title="Proxmox Sentinel - SOC Interface", layout="wide")
 
 ensure_session_state()
 
-with st.sidebar:
-    st.session_state["theme"] = st.radio(
-        "Theme",
-        options=["Sombre", "Clair"],
-        index=0 if st.session_state["theme"] == "Sombre" else 1,
-        horizontal=True,
-    )
+navigation_options = [
+    "Vue SOC",
+    "Incidents",
+    "Supervision Proxmox",
+    "Reponse active",
+    "Logs SSH / Syslog",
+    "Audit",
+    "Plateforme",
+]
+refresh_options = {
+    "Manuel": None,
+    "5 secondes": "5s",
+    "10 secondes": "10s",
+    "30 secondes": "30s",
+}
+if st.session_state.get("navigation") not in navigation_options:
+    st.session_state["navigation"] = "Vue SOC"
+if st.session_state.get("refresh_label") not in refresh_options:
+    st.session_state["refresh_label"] = "5 secondes"
 
 render_theme_css(st.session_state["theme"])
 
@@ -1423,6 +1610,20 @@ render_hero(
     "SOC Dashboard",
     "Supervision Proxmox, detection comportementale explicable, incidents correles et reponse active human-in-the-loop.",
 )
+
+with st.sidebar:
+    st.markdown(
+        """
+        <div class="soc-nav-panel">
+          <div class="soc-nav-title">Proxmox Sentinel</div>
+          <div class="soc-nav-copy">Navigation</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.radio("Page", options=navigation_options, key="navigation")
+
+navigation = st.session_state["navigation"]
 
 try:
     settings = read_settings()
@@ -1432,102 +1633,45 @@ except Exception as exc:
     settings = None
     settings_error = str(exc)
 
-with st.sidebar:
-    st.header("Etat de la plateforme")
-    if settings is None:
-        st.error(f"Configuration invalide: {settings_error}")
-    else:
-        st.caption(f"Base SQLite: {settings.db_path}")
-        if not settings.verify_ssl:
-            st.warning("VERIFY_SSL=False est adapte au lab, pas a la production.")
-        if settings.protected_vmids:
-            protected_list = ", ".join(str(vmid) for vmid in sorted(settings.protected_vmids))
-            st.info(f"VM protegees: {protected_list}")
-        render_collector_status(settings)
-        render_syslog_status(settings)
-        if settings.syslog_enabled and settings.syslog_vm_map:
-            syslog_targets = ", ".join(
-                f"{mapping.vmid}@{mapping.host}/{mapping.node}" for mapping in settings.syslog_vm_map
-            )
-            st.caption(f"Syslog map: {syslog_targets}")
-        if settings.ssh_log_targets:
-            targets = ", ".join(f"{target.vmid}@{target.host}" for target in settings.ssh_log_targets)
-            st.caption(f"Fallback SSH: {targets}")
-        if settings.app_persist_on_render:
-            st.warning("APP_PERSIST_ON_RENDER=True: Streamlit ecrit aussi les metriques.")
-        else:
-            st.caption("Persistance UI desactivee: collecte assuree par proxmox-collector.")
-
 if settings is None:
+    render_section("Configuration", "Le fichier .env doit etre valide avant de charger le dashboard.")
+    st.error(f"Configuration invalide: {settings_error}")
     st.info("Complete le fichier .env avec des identifiants API valides pour afficher le dashboard.")
     st.stop()
 
 proxmox, connection_error = get_connection(settings)
 
-with st.sidebar:
-    if proxmox:
-        st.success("Connecte a l'API Proxmox")
-    else:
-        st.error(f"Erreur de connexion: {connection_error}")
-
 if not proxmox:
+    if navigation == "Plateforme":
+        render_platform_tab(settings, proxmox, connection_error, [], refresh_options)
+    else:
+        st.error(f"Erreur de connexion a l'API Proxmox: {connection_error}")
+        st.info("La page Plateforme contient le detail de configuration et l'etat des services.")
     st.stop()
 
 try:
     nodes = fetch_nodes(proxmox)
 except Exception as exc:
-    st.error(f"Impossible de recuperer les noeuds Proxmox: {exc}")
+    if navigation == "Plateforme":
+        st.error(f"Impossible de recuperer les noeuds Proxmox: {exc}")
+        render_platform_tab(settings, proxmox, connection_error, [], refresh_options)
+    else:
+        st.error(f"Impossible de recuperer les noeuds Proxmox: {exc}")
     st.stop()
 
 node_names = [node["node"] for node in nodes if node.get("node")]
 if not node_names:
-    st.warning("Aucun noeud Proxmox n'a ete retourne par l'API.")
+    if navigation == "Plateforme":
+        render_platform_tab(settings, proxmox, connection_error, [], refresh_options)
+    else:
+        st.warning("Aucun noeud Proxmox n'a ete retourne par l'API.")
     st.stop()
 
-default_node = st.session_state["selected_node"]
-default_node_index = node_names.index(default_node) if default_node in node_names else 0
+if st.session_state.get("selected_node") not in node_names:
+    st.session_state["selected_node"] = node_names[0]
 
-refresh_options = {
-    "Manuel": None,
-    "5 secondes": "5s",
-    "10 secondes": "10s",
-    "30 secondes": "30s",
-}
-navigation_options = [
-    "Vue SOC",
-    "Incidents",
-    "Supervision Proxmox",
-    "Reponse active",
-    "Logs SSH / Syslog",
-    "Audit",
-]
-
-with st.sidebar:
-    st.markdown(
-        """
-        <div class="soc-nav-panel">
-          <div class="soc-nav-title">Navigation</div>
-          <div class="soc-nav-copy">Choisis la page de travail dans le menu ci-dessous.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    navigation = st.radio("Page", options=navigation_options, index=0)
-    st.caption(f"Page active: {navigation}")
-    st.divider()
-    selected_node = st.selectbox("Noeud", options=node_names, index=default_node_index)
-    refresh_label = st.selectbox("Rafraichissement", options=list(refresh_options.keys()), index=1)
-    st.divider()
-    st.caption("Regles actives")
-    st.write(f"CPU host: {settings.host_cpu_warn:.0f}% / {settings.host_cpu_critical:.0f}%")
-    st.write(f"CPU VM: {settings.vm_cpu_warn:.0f}% / {settings.vm_cpu_critical:.0f}%")
-    st.write(f"RAM VM: {settings.vm_ram_warn:.0f}% / {settings.vm_ram_critical:.0f}%")
-    st.write(f"Duree min: {settings.alert_min_duration_seconds}s")
-    if not hasattr(st, "fragment"):
-        st.info("Cette version de Streamlit ne supporte pas le rafraichissement automatique fragment.")
-
-st.session_state["selected_node"] = selected_node
-refresh_every = refresh_options[refresh_label]
+selected_node = st.session_state["selected_node"]
+refresh_every = refresh_options[st.session_state["refresh_label"]]
 
 
 @get_fragment_decorator(refresh_every)
@@ -1572,6 +1716,8 @@ def render_dashboard() -> None:
         render_ssh_events_tab(settings, node_names, vm_statuses)
     elif navigation == "Audit":
         render_audit_tab(settings)
+    elif navigation == "Plateforme":
+        render_platform_tab(settings, proxmox, connection_error, node_names, refresh_options)
 
 
 render_dashboard()
