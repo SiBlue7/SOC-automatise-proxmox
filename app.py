@@ -18,6 +18,7 @@ from storage import (
     fetch_actions,
     fetch_alerts,
     fetch_latest_collector_run,
+    fetch_recent_ssh_events,
     fetch_soc_metrics,
     init_db,
     insert_action,
@@ -196,11 +197,12 @@ def render_alert_banner(current_alerts: List[AlertCandidate]) -> None:
 
 def render_soc_metrics(settings: AppConfig) -> None:
     metrics = fetch_soc_metrics(settings.db_path)
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Alertes actives", metrics["active_alerts"])
     col2.metric("Alertes total", metrics["total_alerts"])
     col3.metric("Actions journalisees", metrics["total_actions"])
-    col4.metric("MTTD moyen", format_duration(metrics["avg_mttd"]))
+    col4.metric("Evenements SSH", metrics["total_ssh_events"])
+    col5.metric("MTTD moyen", format_duration(metrics["avg_mttd"]))
     st.caption(f"MTTR moyen observe: {format_duration(metrics['avg_mttr'])}")
 
 
@@ -279,6 +281,27 @@ def format_actions_dataframe(actions: List[Dict[str, object]]) -> pd.DataFrame:
             "result": "Resultat",
             "protected": "VM protegee",
             "message": "Message",
+        }
+    )
+    return frame
+
+
+def format_ssh_events_dataframe(events: List[Dict[str, object]]) -> pd.DataFrame:
+    frame = pd.DataFrame(events)
+    if frame.empty:
+        return frame
+    frame = frame.rename(
+        columns={
+            "id": "ID",
+            "timestamp": "Horodatage",
+            "collected_at": "Collecte",
+            "node": "Noeud",
+            "vmid": "VMID",
+            "target_host": "Cible",
+            "source_ip": "Source",
+            "username": "Utilisateur",
+            "event_type": "Evenement",
+            "raw_line": "Log brut",
         }
     )
     return frame
@@ -556,6 +579,32 @@ def render_audit_tab(settings: AppConfig) -> None:
         st.dataframe(actions_frame, use_container_width=True, hide_index=True)
 
 
+def render_ssh_events_tab(settings: AppConfig, node_names: List[str], vm_statuses: Dict[int, Dict[str, object]]) -> None:
+    st.subheader("Evenements SSH collectes")
+    if not settings.ssh_log_targets:
+        st.info("Aucune cible SSH configuree. Renseigne SSH_LOG_TARGETS pour activer cette vue.")
+        return
+
+    filter_col1, filter_col2 = st.columns(2)
+    node_filter = filter_col1.selectbox("Noeud logs SSH", options=["Tous", *node_names])
+    vm_choices = {"Toutes": None}
+    for vmid in sorted(vm_statuses):
+        vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
+    vm_filter_label = filter_col2.selectbox("VM logs SSH", options=list(vm_choices.keys()))
+
+    events = fetch_recent_ssh_events(
+        settings.db_path,
+        limit=200,
+        node=node_filter,
+        vmid=vm_choices[vm_filter_label],
+    )
+    events_frame = format_ssh_events_dataframe(events)
+    if events_frame.empty:
+        st.info("Aucun evenement SSH collecte pour les filtres selectionnes.")
+    else:
+        st.dataframe(events_frame, use_container_width=True, hide_index=True)
+
+
 def get_fragment_decorator(run_every: Optional[str]):
     fragment_api = getattr(st, "fragment", None)
     if fragment_api is None:
@@ -633,6 +682,9 @@ with st.sidebar:
             protected_list = ", ".join(str(vmid) for vmid in sorted(settings.protected_vmids))
             st.info(f"VM protegees: {protected_list}")
         render_collector_status(settings)
+        if settings.ssh_log_targets:
+            targets = ", ".join(f"{target.vmid}@{target.host}" for target in settings.ssh_log_targets)
+            st.caption(f"Logs SSH: {targets}")
         if settings.app_persist_on_render:
             st.warning("APP_PERSIST_ON_RENDER=True: Streamlit ecrit aussi les metriques.")
         else:
@@ -720,8 +772,8 @@ def render_dashboard() -> None:
             upsert_alert(settings.db_path, alert)
         resolve_alerts_for_node(settings.db_path, selected_node, evaluation.active_keys, sample_time)
 
-    tab_supervision, tab_incidents, tab_response, tab_audit = st.tabs(
-        ["Supervision", "Incidents / Alertes", "Reponse active", "Audit"]
+    tab_supervision, tab_incidents, tab_response, tab_ssh, tab_audit = st.tabs(
+        ["Supervision", "Incidents / Alertes", "Reponse active", "Logs SSH", "Audit"]
     )
 
     with tab_supervision:
@@ -732,6 +784,9 @@ def render_dashboard() -> None:
 
     with tab_response:
         render_response_tab(settings, proxmox, selected_node, vm_statuses)
+
+    with tab_ssh:
+        render_ssh_events_tab(settings, node_names, vm_statuses)
 
     with tab_audit:
         render_audit_tab(settings)

@@ -9,7 +9,7 @@ Le projet sert de support a un memoire de Master Cybersecurite sur l'apport de l
 L'approche reste volontairement progressive :
 
 - collecte agentless via l'API Proxmox ;
-- detection explicable par regles et scores ;
+- detection explicable par regles, scores et correlation simple ;
 - priorisation des alertes pour limiter la surcharge analyste ;
 - reponse active human-in-the-loop ;
 - journalisation des preuves pour mesurer MTTD et MTTR.
@@ -17,12 +17,13 @@ L'approche reste volontairement progressive :
 ## Architecture
 
 - `app.py` : interface Streamlit, visualisation et reponse active.
-- `collector.py` : collecte continue indépendante du navigateur.
+- `collector.py` : collecte continue independante du navigateur.
+- `ssh_log_collector.py` : collecte optionnelle des logs SSH des VM cibles.
 - `config.py` : lecture et validation du `.env`.
 - `proxmox_client.py` : connexion API et collecte Proxmox.
 - `detection.py` : regles d'alertes, score et severite.
 - `actions.py` : isolement/restauration QEMU `net0`.
-- `storage.py` : persistance SQLite des metriques, alertes et actions.
+- `storage.py` : persistance SQLite des metriques, alertes, actions et evenements SSH.
 
 Le perimetre de reponse active est limite aux VM QEMU et a l'interface `net0`. Les LXC ne sont pas modifies par ce POC.
 
@@ -55,11 +56,37 @@ MAX_HISTORY_POINTS=30
 COLLECT_INTERVAL_SECONDS=5
 APP_PERSIST_ON_RENDER=False
 COLLECTOR_HEARTBEAT_SECONDS=30
+SSH_LOG_TARGETS=103:192.168.1.139:demo-user:/var/log/auth.log
+SSH_KEY_PATH=/ssh_keys/soc_dashboard_key
+SSH_CONNECT_TIMEOUT_SECONDS=5
+SSH_LOG_LOOKBACK_MINUTES=10
+SSH_LOG_MAX_LINES=300
+SSH_AUTH_FAILURE_WARN=5
+SSH_AUTH_FAILURE_CRITICAL=20
+SSH_CORRELATION_CPU_THRESHOLD=50
+SSH_CORRELATION_WINDOW_SECONDS=300
 ```
 
 `PROTECTED_VMIDS` accepte une liste separee par virgules, par exemple `100,101`. Ces VM ne peuvent pas etre isolees depuis le dashboard.
 
 `COLLECT_INTERVAL_SECONDS` pilote la frequence de collecte du backend. `APP_PERSIST_ON_RENDER=False` evite que Streamlit double les ecritures du collecteur.
+
+`SSH_LOG_TARGETS` active la correlation SSH. Format : `vmid:ip:user[:log_path]`, avec plusieurs cibles separees par `;`.
+
+Le collecteur utilise une cle SSH montee depuis `./ssh_keys`. Cree une cle dediee sur la VM dashboard puis ajoute sa cle publique dans `~demo-user/.ssh/authorized_keys` sur la VM cible :
+
+```bash
+mkdir -p ssh_keys
+ssh-keygen -t ed25519 -f ssh_keys/soc_dashboard_key -N ""
+ssh-copy-id -i ssh_keys/soc_dashboard_key.pub demo-user@192.168.1.139
+chmod 600 ssh_keys/soc_dashboard_key
+```
+
+L'utilisateur cible doit pouvoir lire les logs SSH. Selon la distribution, ajoute-le au groupe `adm` :
+
+```bash
+sudo usermod -aG adm demo-user
+```
 
 ## Lancement Docker
 
@@ -93,6 +120,8 @@ Le service `proxmox-collector` continue de collecter meme si aucune page Streaml
   - CPU host ;
   - CPU VM ;
   - RAM VM ;
+  - echecs SSH ;
+  - correlation echecs SSH + CPU ;
   - duree minimale avant alerte ;
   - score d'anomalie et severite faible/moyen/critique.
 - Vue `Incidents / Alertes` :
@@ -104,6 +133,11 @@ Le service `proxmox-collector` continue de collecter meme si aucune page Streaml
   - blocage des VM protegees ;
   - journal d'audit des actions ;
   - restauration reseau.
+- Correlation SSH :
+  - collecte des echecs SSH depuis la VM cible ;
+  - alerte `ssh_bruteforce_suspected` si les echecs depassent le seuil ;
+  - alerte `ssh_cpu_correlated` si les echecs SSH coincident avec une pression CPU ;
+  - onglet `Logs SSH` pour auditer les evenements collectes.
 
 ## Protocole experimental
 
@@ -115,45 +149,23 @@ Scenario reproductible pour une demonstration de soutenance avec collecte contin
 4. Selectionner une VM QEMU cible non protegee.
 5. Generer une charge CPU controlee sur la VM cible.
 6. Observer l'apparition de l'alerte dans `Supervision` puis `Incidents / Alertes`.
-7. Noter le score, la severite et l'horodatage de detection.
-8. Confirmer l'isolement dans `Reponse active` si le scenario le demande.
-9. Verifier que `net0` passe en etat isole.
-10. Restaurer le reseau.
-11. Utiliser la timeline et le journal d'audit comme preuve experimentale.
+7. Lancer un brute-force SSH controle pour verifier la correlation logs.
+8. Noter le score, la severite et l'horodatage de detection.
+9. Confirmer l'isolement dans `Reponse active` si le scenario le demande.
+10. Verifier que `net0` passe en etat isole.
+11. Restaurer le reseau.
+12. Utiliser la timeline, les logs SSH et le journal d'audit comme preuve experimentale.
 
 Exemple Linux pour generer une charge CPU de demonstration dans une VM de test :
 
 ```bash
 yes > /dev/null
-```
-
-Arreter la charge :
-
-```bash
 pkill yes
 ```
-
-Plan court de recolte :
-
-- Samedi soir : 3 a 4 heures de baseline et usage normal, sans attaque.
-- Nuit samedi/dimanche : 8 a 10 heures de baseline sans navigateur ouvert.
-- Dimanche : 5 charges CPU legitimes de 5 minutes, avec 10 minutes de pause.
-- Lundi en journee : collecte passive pendant les cours.
-- Lundi soir : 3 scans Nmap et 3 brute-force SSH controles depuis Kali.
-- Mardi en journee : collecte passive pendant les cours.
-- Mardi soir : 3 scenarios mixtes scan puis brute-force, avec 2 a 4 isolements/restaurations maximum.
 
 ## Analyse des donnees
 
 Le fichier `experiment_log.csv` sert a documenter manuellement les fenetres de test. Il permet de relier les metriques SQLite a la verite terrain : baseline, charge legitime, scan Nmap, brute-force SSH, scenario mixte.
-
-Colonnes importantes :
-
-- `start_time` / `end_time` : fenetre temporelle ISO, par exemple `2026-04-26T12:32:00`.
-- `scenario` : `baseline`, `cpu_legitimate`, `nmap`, `hydra` ou `mixed`.
-- `vmid` : VM cible observee.
-- `is_malicious` : `true` pour une attaque simulee, `false` pour une activite normale.
-- `observed_alert` : `true` si le SOC a declenche une alerte pendant la fenetre.
 
 Generer les figures :
 
@@ -182,12 +194,13 @@ Sorties :
 - `analysis_output/04_confusion_matrix.png` : vrais positifs, faux positifs, vrais negatifs, faux negatifs.
 - `analysis_output/05_mttd_mttr.png` : delais detection/reponse.
 - `analysis_output/06_cpu_normal_vs_attack.png` : distribution CPU par scenario.
+- `analysis_output/07_ssh_events_timeline.png` : evenements SSH et alertes correlees.
 - `analysis_output/summary_results.md` : synthese prete a reprendre dans le memoire.
 
 ## Justification academique
 
 - Pitkar (2025) soutient l'interet de l'automatisation pour coordonner detection et reponse dans des environnements cloud.
-- Iacovazzi et Raza (2023) motivent l'evolution future vers des modeles de type Isolation Forest lorsque l'historique sera suffisant.
+- Iacovazzi et Raza (2023) motive l'evolution future vers des modeles de type Isolation Forest lorsque l'historique sera suffisant.
 - Lee et al. (2022), SIERRA, inspire la priorisation par score/severite afin d'aider l'analyste.
 - Jindal et al. (2021), IAD, soutient l'interet d'une detection indirecte a partir des metriques de ressources VM/hyperviseur.
 
@@ -195,7 +208,7 @@ Sorties :
 
 - Detection par seuils explicables, pas encore par apprentissage automatique.
 - Polling API regulier, pas d'architecture event-driven.
-- Pas de correlation avancee avec Syslog ou logs SSH.
+- Correlation SSH initiale disponible, mais limitee aux logs accessibles par SSH.
 - Pas de detection reseau profonde.
 - Pas de remediations autonomes completes : l'analyste valide l'isolement.
 - Lab uniquement avec `VERIFY_SSL=False`; a corriger pour une production.

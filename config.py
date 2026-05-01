@@ -1,8 +1,16 @@
 import os
 from dataclasses import dataclass
-from typing import Optional, Set
+from typing import List, Optional, Set
 
 from dotenv import load_dotenv
+
+
+@dataclass(frozen=True)
+class SshLogTarget:
+    vmid: int
+    host: str
+    user: str
+    log_path: str
 
 
 @dataclass(frozen=True)
@@ -25,6 +33,15 @@ class AppConfig:
     collect_interval_seconds: int
     app_persist_on_render: bool
     collector_heartbeat_seconds: int
+    ssh_log_targets: List[SshLogTarget]
+    ssh_key_path: str
+    ssh_connect_timeout_seconds: int
+    ssh_log_lookback_minutes: int
+    ssh_log_max_lines: int
+    ssh_auth_failure_warn: int
+    ssh_auth_failure_critical: int
+    ssh_correlation_cpu_threshold: float
+    ssh_correlation_window_seconds: int
 
 
 def parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -75,6 +92,38 @@ def parse_vmid_set(value: Optional[str]) -> Set[int]:
     return vmids
 
 
+def parse_ssh_log_targets(value: Optional[str]) -> List[SshLogTarget]:
+    if value is None or not value.strip():
+        return []
+
+    targets: List[SshLogTarget] = []
+    for raw_target in value.split(";"):
+        target = raw_target.strip()
+        if not target:
+            continue
+        parts = target.split(":")
+        if len(parts) not in {3, 4}:
+            raise ValueError(
+                "SSH_LOG_TARGETS doit utiliser le format "
+                "vmid:host:user[:log_path], separe par des points-virgules."
+            )
+        try:
+            vmid = int(parts[0])
+        except ValueError as exc:
+            raise ValueError("Le premier champ de chaque SSH_LOG_TARGETS doit etre un VMID.") from exc
+
+        targets.append(
+            SshLogTarget(
+                vmid=vmid,
+                host=parts[1].strip(),
+                user=parts[2].strip(),
+                log_path=parts[3].strip() if len(parts) == 4 and parts[3].strip() else "/var/log/auth.log",
+            )
+        )
+
+    return targets
+
+
 def sanitize_host(raw_host: str) -> str:
     host = raw_host.strip()
     host = host.removeprefix("https://").removeprefix("http://")
@@ -112,6 +161,11 @@ def read_settings() -> AppConfig:
     if vm_ram_warn >= vm_ram_critical:
         raise ValueError("ALERT_VM_RAM_WARN doit etre inferieur a ALERT_VM_RAM_CRITICAL.")
 
+    ssh_auth_failure_warn = parse_int_env("SSH_AUTH_FAILURE_WARN", 5, minimum=1)
+    ssh_auth_failure_critical = parse_int_env("SSH_AUTH_FAILURE_CRITICAL", 20, minimum=1)
+    if ssh_auth_failure_warn >= ssh_auth_failure_critical:
+        raise ValueError("SSH_AUTH_FAILURE_WARN doit etre inferieur a SSH_AUTH_FAILURE_CRITICAL.")
+
     return AppConfig(
         host=sanitize_host(required["PROXMOX_HOST"]),
         user=required["PROXMOX_USER"],
@@ -131,4 +185,13 @@ def read_settings() -> AppConfig:
         collect_interval_seconds=parse_int_env("COLLECT_INTERVAL_SECONDS", 5, minimum=1),
         app_persist_on_render=parse_bool(os.getenv("APP_PERSIST_ON_RENDER"), default=False),
         collector_heartbeat_seconds=parse_int_env("COLLECTOR_HEARTBEAT_SECONDS", 30, minimum=5),
+        ssh_log_targets=parse_ssh_log_targets(os.getenv("SSH_LOG_TARGETS")),
+        ssh_key_path=os.getenv("SSH_KEY_PATH", "").strip(),
+        ssh_connect_timeout_seconds=parse_int_env("SSH_CONNECT_TIMEOUT_SECONDS", 5, minimum=1),
+        ssh_log_lookback_minutes=parse_int_env("SSH_LOG_LOOKBACK_MINUTES", 10, minimum=1),
+        ssh_log_max_lines=parse_int_env("SSH_LOG_MAX_LINES", 300, minimum=20),
+        ssh_auth_failure_warn=ssh_auth_failure_warn,
+        ssh_auth_failure_critical=ssh_auth_failure_critical,
+        ssh_correlation_cpu_threshold=parse_float_env("SSH_CORRELATION_CPU_THRESHOLD", 50.0),
+        ssh_correlation_window_seconds=parse_int_env("SSH_CORRELATION_WINDOW_SECONDS", 300, minimum=30),
     )

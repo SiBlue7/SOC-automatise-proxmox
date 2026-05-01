@@ -95,11 +95,31 @@ def init_db(db_path: str) -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ssh_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                collected_at TEXT NOT NULL,
+                node TEXT NOT NULL,
+                vmid INTEGER NOT NULL,
+                target_host TEXT NOT NULL,
+                source_ip TEXT,
+                username TEXT,
+                event_type TEXT NOT NULL,
+                raw_line TEXT NOT NULL,
+                line_hash TEXT NOT NULL UNIQUE
+            )
+            """
+        )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_metrics_node_time ON metrics(node, timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_alerts_status_time ON alerts(status, first_seen)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_alerts_key_status ON alerts(alert_key, status)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_actions_time ON actions(timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_collector_runs_time ON collector_runs(timestamp)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_time ON ssh_events(timestamp)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_vmid_time ON ssh_events(vmid, timestamp)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_type_time ON ssh_events(event_type, timestamp)")
 
 
 def insert_host_metric(db_path: str, node: str, node_status: Dict[str, object], timestamp: datetime) -> None:
@@ -308,6 +328,85 @@ def fetch_latest_collector_run(db_path: str) -> Optional[Dict[str, object]]:
     return dict(row) if row else None
 
 
+def insert_ssh_events(db_path: str, events: List[Dict[str, object]]) -> int:
+    if not events:
+        return 0
+
+    inserted = 0
+    with connect_db(db_path) as connection:
+        for event in events:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO ssh_events (
+                    timestamp, collected_at, node, vmid, target_host, source_ip,
+                    username, event_type, raw_line, line_hash
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event["timestamp"],
+                    event["collected_at"],
+                    event["node"],
+                    int(event["vmid"]),
+                    event["target_host"],
+                    event.get("source_ip"),
+                    event.get("username"),
+                    event["event_type"],
+                    event["raw_line"],
+                    event["line_hash"],
+                ),
+            )
+            inserted += cursor.rowcount
+    return inserted
+
+
+def fetch_ssh_failure_counts(db_path: str, node: str, since: datetime) -> Dict[int, int]:
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT vmid, COUNT(*) AS count
+            FROM ssh_events
+            WHERE node = ?
+              AND timestamp >= ?
+              AND event_type IN ('failed_password', 'invalid_user')
+            GROUP BY vmid
+            """,
+            (node, iso_timestamp(since)),
+        ).fetchall()
+    return {int(row["vmid"]): int(row["count"]) for row in rows}
+
+
+def fetch_recent_ssh_events(
+    db_path: str,
+    limit: int = 100,
+    node: Optional[str] = None,
+    vmid: Optional[int] = None,
+) -> List[Dict[str, object]]:
+    clauses = []
+    params: List[object] = []
+    if node and node != "Tous":
+        clauses.append("node = ?")
+        params.append(node)
+    if vmid is not None:
+        clauses.append("vmid = ?")
+        params.append(vmid)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT id, timestamp, collected_at, node, vmid, target_host,
+                   source_ip, username, event_type, raw_line
+            FROM ssh_events
+            {where_sql}
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> List[Dict[str, object]]:
     return [dict(row) for row in rows]
 
@@ -380,6 +479,7 @@ def fetch_soc_metrics(db_path: str) -> Dict[str, object]:
         ).fetchone()["count"]
         total_alerts = connection.execute("SELECT COUNT(*) AS count FROM alerts").fetchone()["count"]
         total_actions = connection.execute("SELECT COUNT(*) AS count FROM actions").fetchone()["count"]
+        total_ssh_events = connection.execute("SELECT COUNT(*) AS count FROM ssh_events").fetchone()["count"]
         avg_mttd = connection.execute(
             """
             SELECT AVG((julianday(first_seen) - julianday(active_since)) * 86400.0) AS value
@@ -411,6 +511,7 @@ def fetch_soc_metrics(db_path: str) -> Dict[str, object]:
         "active_alerts": int(active_alerts or 0),
         "total_alerts": int(total_alerts or 0),
         "total_actions": int(total_actions or 0),
+        "total_ssh_events": int(total_ssh_events or 0),
         "avg_mttd": float(avg_mttd or 0.0),
         "avg_mttr": float(avg_mttr or 0.0),
     }

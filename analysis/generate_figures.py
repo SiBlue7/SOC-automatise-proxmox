@@ -47,10 +47,11 @@ def read_table(db_path: Path, table_name: str) -> pd.DataFrame:
             return pd.DataFrame()
 
 
-def load_data(db_path: Path, log_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_data(db_path: Path, log_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     metrics = read_table(db_path, "metrics")
     alerts = read_table(db_path, "alerts")
     actions = read_table(db_path, "actions")
+    ssh_events = read_table(db_path, "ssh_events")
 
     if log_path.exists():
         experiments = pd.read_csv(log_path)
@@ -74,6 +75,7 @@ def load_data(db_path: Path, log_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame
         (metrics, ["timestamp"]),
         (alerts, ["first_seen", "last_seen", "active_since", "resolved_at"]),
         (actions, ["timestamp"]),
+        (ssh_events, ["timestamp", "collected_at"]),
         (experiments, ["start_time", "end_time"]),
     ]:
         for column in columns:
@@ -92,8 +94,10 @@ def load_data(db_path: Path, log_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame
         alerts["vmid"] = pd.to_numeric(alerts["vmid"], errors="coerce")
     if "vmid" in actions.columns:
         actions["vmid"] = pd.to_numeric(actions["vmid"], errors="coerce")
+    if "vmid" in ssh_events.columns:
+        ssh_events["vmid"] = pd.to_numeric(ssh_events["vmid"], errors="coerce")
 
-    return metrics, alerts, actions, experiments
+    return metrics, alerts, actions, ssh_events, experiments
 
 
 def parse_bool(value: object) -> bool:
@@ -399,11 +403,47 @@ def figure_cpu_distribution(metrics: pd.DataFrame, experiments: pd.DataFrame, vm
     plt.close(fig)
 
 
+def figure_ssh_events_timeline(ssh_events: pd.DataFrame, alerts: pd.DataFrame, out: Path) -> None:
+    output_path = out / "07_ssh_events_timeline.png"
+    if ssh_events.empty:
+        save_placeholder(output_path, "Timeline SSH", "Aucun evenement SSH collecte.")
+        return
+
+    data = ssh_events.sort_values("timestamp").copy()
+    event_colors = {
+        "failed_password": "#b91c1c",
+        "invalid_user": "#d97706",
+        "accepted_password": "#16a34a",
+    }
+    data["y"] = range(1, len(data) + 1)
+
+    fig, ax = plt.subplots(figsize=(14, 5))
+    colors = [event_colors.get(str(event_type), "#6b7280") for event_type in data["event_type"]]
+    ax.scatter(data["timestamp"], data["y"], c=colors, s=60, edgecolor="#111827", linewidth=0.4)
+
+    ssh_alerts = alerts[alerts["event_type"].astype(str).str.contains("ssh", na=False)] if not alerts.empty else pd.DataFrame()
+    for _, alert in ssh_alerts.iterrows():
+        first_seen = alert.get("first_seen")
+        if pd.notna(first_seen):
+            ax.axvline(first_seen, color=SEVERITY_COLORS.get(str(alert.get("severity")), "#6b7280"), alpha=0.55, linewidth=1)
+
+    ax.set_title("Evenements SSH collectes et alertes correlees")
+    ax.set_ylabel("Evenements SSH")
+    ax.set_xlabel("Temps")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+    ax.grid(alpha=0.25)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+
+
 def write_summary(
     out: Path,
     metrics: pd.DataFrame,
     alerts: pd.DataFrame,
     actions: pd.DataFrame,
+    ssh_events: pd.DataFrame,
     experiments: pd.DataFrame,
     vmid: Optional[int],
 ) -> None:
@@ -414,6 +454,7 @@ def write_summary(
     metrics_count = len(metrics)
     alert_count = len(alerts)
     action_count = len(actions)
+    ssh_event_count = len(ssh_events)
     experiment_count = len(experiments)
     first_metric = metrics["timestamp"].min() if not metrics.empty and "timestamp" in metrics.columns else None
     last_metric = metrics["timestamp"].max() if not metrics.empty and "timestamp" in metrics.columns else None
@@ -429,6 +470,7 @@ def write_summary(
         f"- Nombre de points de metriques : {metrics_count}",
         f"- Nombre d'alertes : {alert_count}",
         f"- Nombre d'actions de reponse active : {action_count}",
+        f"- Nombre d'evenements SSH collectes : {ssh_event_count}",
         f"- Nombre de scenarios documentes : {experiment_count}",
         f"- Premiere metrique : {first_metric if first_metric is not None else 'n/a'}",
         f"- Derniere metrique : {last_metric if last_metric is not None else 'n/a'}",
@@ -452,6 +494,13 @@ def write_summary(
         for severity, count in alerts["severity"].value_counts().sort_index().items():
             lines.append(f"- {severity} : {count}")
 
+    lines.extend(["", "## Evenements SSH", ""])
+    if ssh_events.empty:
+        lines.append("- Aucun evenement SSH collecte.")
+    else:
+        for event_type, count in ssh_events["event_type"].value_counts().sort_index().items():
+            lines.append(f"- {event_type} : {count}")
+
     lines.extend(["", "## Scenarios documentes", ""])
     if enriched.empty:
         lines.append("- Aucun scenario renseigne dans experiment_log.csv.")
@@ -471,7 +520,7 @@ def write_summary(
             "",
             "- La baseline permet d'evaluer le bruit normal et les vrais negatifs.",
             "- Les charges CPU legitimes evaluent les faux positifs d'une detection par seuils.",
-            "- Les scans Nmap et brute-force SSH sans alerte illustrent les faux negatifs possibles d'une approche metriques-only.",
+            "- Les evenements SSH permettent de reduire les faux negatifs observes avec Hydra.",
             "- Les actions d'isolement/restauration documentent la valeur de la reponse active human-in-the-loop.",
             "- La prochaine evolution logique est la correlation avec les logs SSH/syslog.",
             "",
@@ -488,7 +537,7 @@ def main() -> None:
     output_dir = Path(args.out)
     ensure_output_dir(output_dir)
 
-    metrics, alerts, actions, experiments = load_data(db_path, log_path)
+    metrics, alerts, actions, ssh_events, experiments = load_data(db_path, log_path)
     vmid = choose_vmid(metrics, experiments, args.vmid)
 
     figure_cpu_timeline(metrics, alerts, experiments, vmid, output_dir)
@@ -497,7 +546,8 @@ def main() -> None:
     figure_confusion_matrix(experiments, alerts, output_dir)
     figure_mttd_mttr(alerts, actions, output_dir)
     figure_cpu_distribution(metrics, experiments, vmid, output_dir)
-    write_summary(output_dir, metrics, alerts, actions, experiments, vmid)
+    figure_ssh_events_timeline(ssh_events, alerts, output_dir)
+    write_summary(output_dir, metrics, alerts, actions, ssh_events, experiments, vmid)
 
     print(f"Figures generated in {output_dir.resolve()}")
     print(f"Summary generated at {(output_dir / 'summary_results.md').resolve()}")

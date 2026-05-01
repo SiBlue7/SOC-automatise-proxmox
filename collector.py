@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Set
 
 from config import AppConfig, read_settings
@@ -12,13 +12,16 @@ from proxmox_client import (
     fetch_vm_statuses,
 )
 from storage import (
+    fetch_ssh_failure_counts,
     init_db,
     insert_host_metric,
     insert_vm_metric,
+    insert_ssh_events,
     record_collector_run,
     resolve_alerts_for_node,
     upsert_alert,
 )
+from ssh_log_collector import collect_target_logs, validate_ssh_setup
 
 
 def log(message: str) -> None:
@@ -60,6 +63,13 @@ def run_collection_cycle(
 
             persist_metrics(settings, node_name, node_status, vm_statuses, sample_time)
 
+            ssh_events_inserted = collect_ssh_events_for_node(settings, node_name, vm_statuses, sample_time)
+            since = sample_time - timedelta(seconds=settings.ssh_correlation_window_seconds)
+            ssh_failure_counts = fetch_ssh_failure_counts(settings.db_path, node_name, since)
+            for target in settings.ssh_log_targets:
+                if target.vmid in vm_statuses:
+                    ssh_failure_counts.setdefault(target.vmid, 0)
+
             evaluation = evaluate_detection(
                 settings,
                 node_name,
@@ -67,6 +77,7 @@ def run_collection_cycle(
                 vm_statuses,
                 active_breaches,
                 fired_alert_keys,
+                ssh_failure_counts=ssh_failure_counts,
                 now=sample_time,
             )
             for alert in evaluation.current_alerts:
@@ -76,6 +87,8 @@ def run_collection_cycle(
             nodes_seen += 1
             vm_count += len(vm_statuses)
             alerts_seen += len(evaluation.current_alerts)
+            if ssh_events_inserted:
+                log(f"ssh logs | node={node_name} inserted={ssh_events_inserted}")
         except Exception as exc:
             errors.append(f"{node_name}: {exc}")
 
@@ -120,6 +133,27 @@ def run_collection_cycle(
     log(f"cycle ok | nodes={nodes_seen} vms={vm_count} alerts={alerts_seen}")
 
 
+def collect_ssh_events_for_node(
+    settings: AppConfig,
+    node_name: str,
+    vm_statuses: Dict[int, Dict[str, object]],
+    collected_at: datetime,
+) -> int:
+    inserted = 0
+    if not settings.ssh_log_targets:
+        return inserted
+
+    for target in settings.ssh_log_targets:
+        if target.vmid not in vm_statuses:
+            continue
+        result = collect_target_logs(settings, target, node_name, collected_at)
+        if result.error:
+            log(f"ssh logs error | vmid={target.vmid} host={target.host} | {result.error}")
+            continue
+        inserted += insert_ssh_events(settings.db_path, result.events)
+    return inserted
+
+
 def main() -> None:
     settings = read_settings()
     init_db(settings.db_path)
@@ -131,6 +165,9 @@ def main() -> None:
         "collector started | "
         f"interval={settings.collect_interval_seconds}s db={settings.db_path}"
     )
+    ssh_setup_warning = validate_ssh_setup(settings)
+    if ssh_setup_warning:
+        log(f"ssh logs warning | {ssh_setup_warning}")
 
     while True:
         cycle_started = time.monotonic()

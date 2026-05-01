@@ -14,6 +14,7 @@ services:
       - ./data:/data
       - ./experiment_log.csv:/app/experiment_log.csv:ro
       - ./analysis_output:/app/analysis_output
+      - ./ssh_keys:/ssh_keys:ro
     restart: always
 
   proxmox-collector:
@@ -28,4 +29,5 @@ services:
       SOC_DB_PATH: ${SOC_DB_PATH:-/data/soc_dashboard.sqlite3}
     volumes:
       - ./data:/data
+      - ./ssh_keys:/ssh_keys:ro
     restart: always

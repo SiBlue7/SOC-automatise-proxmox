@@ -94,6 +94,8 @@ def metric_label(metric: str) -> str:
     labels = {
         "cpu_percent": "CPU",
         "ram_percent": "RAM",
+        "ssh_failed_count": "Echecs SSH",
+        "ssh_cpu_correlation": "Correlation SSH/CPU",
     }
     return labels.get(metric, metric)
 
@@ -150,6 +152,118 @@ def build_alert(
     )
 
 
+def build_signal_alert(
+    node_name: str,
+    vmid: int,
+    target_name: str,
+    event_type: str,
+    metric: str,
+    value: float,
+    threshold: float,
+    severity: str,
+    score: int,
+    message: str,
+    active_since: datetime,
+    detected_at: datetime,
+) -> AlertCandidate:
+    return AlertCandidate(
+        alert_key=f"{node_name}:{vmid}:{event_type}",
+        node=node_name,
+        vmid=vmid,
+        scope="vm",
+        event_type=event_type,
+        metric=metric,
+        value=round(value, 2),
+        threshold=threshold,
+        severity=severity,
+        score=score,
+        message=f"{message} sur VM {vmid} ({target_name}).",
+        active_since=active_since,
+        detected_at=detected_at,
+    )
+
+
+def evaluate_ssh_signals(
+    settings: AppConfig,
+    node_name: str,
+    vm_statuses: Dict[int, Dict[str, object]],
+    ssh_failure_counts: Dict[int, int],
+    active_breaches: Dict[str, datetime],
+    fired_alert_keys: Set[str],
+    detected_at: datetime,
+) -> DetectionEvaluation:
+    current_alerts: List[AlertCandidate] = []
+    new_alerts: List[AlertCandidate] = []
+    active_keys: Set[str] = set()
+
+    for vmid, failure_count in ssh_failure_counts.items():
+        vm_status = vm_statuses.get(vmid, {"name": f"VM {vmid}", "cpu": 0.0})
+        target_name = str(vm_status.get("name") or f"VM {vmid}")
+        cpu_percent = float(vm_status.get("cpu", 0.0)) * 100
+
+        correlated_key = f"{node_name}:{vmid}:ssh_cpu_correlated"
+        brute_force_key = f"{node_name}:{vmid}:ssh_bruteforce_suspected"
+
+        if failure_count >= settings.ssh_auth_failure_warn and cpu_percent >= settings.ssh_correlation_cpu_threshold:
+            active_since = active_breaches.setdefault(correlated_key, detected_at)
+            severity = "critical" if failure_count >= settings.ssh_auth_failure_critical else "medium"
+            score = 95 if severity == "critical" else 82
+            alert = build_signal_alert(
+                node_name=node_name,
+                vmid=vmid,
+                target_name=target_name,
+                event_type="ssh_cpu_correlated",
+                metric="ssh_cpu_correlation",
+                value=failure_count,
+                threshold=settings.ssh_auth_failure_warn,
+                severity=severity,
+                score=score,
+                message=(
+                    f"Correlation suspecte: {failure_count} echecs SSH recents "
+                    f"et CPU VM a {cpu_percent:.2f}%"
+                ),
+                active_since=active_since,
+                detected_at=detected_at,
+            )
+            current_alerts.append(alert)
+            active_keys.add(correlated_key)
+            if correlated_key not in fired_alert_keys:
+                new_alerts.append(alert)
+                fired_alert_keys.add(correlated_key)
+        else:
+            active_breaches.pop(correlated_key, None)
+            fired_alert_keys.discard(correlated_key)
+
+        if failure_count >= settings.ssh_auth_failure_warn:
+            active_since = active_breaches.setdefault(brute_force_key, detected_at)
+            severity = "critical" if failure_count >= settings.ssh_auth_failure_critical else "medium"
+            score = min(100, 60 + int((failure_count / settings.ssh_auth_failure_critical) * 35))
+            alert = build_signal_alert(
+                node_name=node_name,
+                vmid=vmid,
+                target_name=target_name,
+                event_type="ssh_bruteforce_suspected",
+                metric="ssh_failed_count",
+                value=failure_count,
+                threshold=settings.ssh_auth_failure_warn,
+                severity=severity,
+                score=score,
+                message=f"Brute-force SSH probable: {failure_count} echecs SSH recents",
+                active_since=active_since,
+                detected_at=detected_at,
+            )
+            current_alerts.append(alert)
+            active_keys.add(brute_force_key)
+            if brute_force_key not in fired_alert_keys:
+                new_alerts.append(alert)
+                fired_alert_keys.add(brute_force_key)
+        else:
+            active_breaches.pop(brute_force_key, None)
+            fired_alert_keys.discard(brute_force_key)
+
+    return DetectionEvaluation(current_alerts=current_alerts, new_alerts=new_alerts, active_keys=active_keys)
+
+
 def evaluate_detection(
     settings: AppConfig,
     node_name: str,
@@ -157,6 +271,7 @@ def evaluate_detection(
     vm_statuses: Dict[int, Dict[str, object]],
     active_breaches: Dict[str, datetime],
     fired_alert_keys: Set[str],
+    ssh_failure_counts: Optional[Dict[int, int]] = None,
     now: Optional[datetime] = None,
 ) -> DetectionEvaluation:
     detected_at = now or datetime.now()
@@ -205,6 +320,20 @@ def evaluate_detection(
             if alert_key not in fired_alert_keys:
                 new_alerts.append(alert)
                 fired_alert_keys.add(alert_key)
+
+    if ssh_failure_counts:
+        ssh_evaluation = evaluate_ssh_signals(
+            settings,
+            node_name,
+            vm_statuses,
+            ssh_failure_counts,
+            active_breaches,
+            fired_alert_keys,
+            detected_at,
+        )
+        current_alerts.extend(ssh_evaluation.current_alerts)
+        new_alerts.extend(ssh_evaluation.new_alerts)
+        active_keys.update(ssh_evaluation.active_keys)
 
     current_alerts.sort(key=lambda alert: (SEVERITY_ORDER[alert.severity], alert.score), reverse=True)
     new_alerts.sort(key=lambda alert: (SEVERITY_ORDER[alert.severity], alert.score), reverse=True)
