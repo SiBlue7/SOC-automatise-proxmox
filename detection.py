@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from config import AppConfig
 
@@ -95,7 +95,10 @@ def metric_label(metric: str) -> str:
         "cpu_percent": "CPU",
         "ram_percent": "RAM",
         "ssh_failed_count": "Echecs SSH",
+        "ssh_failed_count_source": "Echecs SSH par source",
+        "ssh_source_count": "Sources SSH distinctes",
         "ssh_cpu_correlation": "Correlation SSH/CPU",
+        "ssh_success_after_failures": "Succes SSH apres echecs",
     }
     return labels.get(metric, metric)
 
@@ -188,6 +191,9 @@ def evaluate_ssh_signals(
     node_name: str,
     vm_statuses: Dict[int, Dict[str, object]],
     ssh_failure_counts: Dict[int, int],
+    ssh_source_failure_counts: Optional[Dict[Tuple[int, str], int]],
+    ssh_distributed_counts: Optional[Dict[int, Dict[str, int]]],
+    ssh_success_after_failures: Optional[List[Dict[str, object]]],
     active_breaches: Dict[str, datetime],
     fired_alert_keys: Set[str],
     detected_at: datetime,
@@ -261,6 +267,106 @@ def evaluate_ssh_signals(
             active_breaches.pop(brute_force_key, None)
             fired_alert_keys.discard(brute_force_key)
 
+    if ssh_source_failure_counts:
+        for (vmid, source_ip), failure_count in ssh_source_failure_counts.items():
+            if failure_count < settings.ssh_source_failure_warn:
+                continue
+            vm_status = vm_statuses.get(vmid, {"name": f"VM {vmid}"})
+            target_name = str(vm_status.get("name") or f"VM {vmid}")
+            alert_key = f"{node_name}:{vmid}:ssh_bruteforce_source:{source_ip}"
+            active_since = active_breaches.setdefault(alert_key, detected_at)
+            severity = "critical" if failure_count >= settings.ssh_auth_failure_critical else "medium"
+            score = min(100, 68 + int((failure_count / settings.ssh_auth_failure_critical) * 27))
+            alert = build_signal_alert(
+                node_name=node_name,
+                vmid=vmid,
+                target_name=target_name,
+                event_type="ssh_bruteforce_source",
+                metric="ssh_failed_count_source",
+                value=failure_count,
+                threshold=settings.ssh_source_failure_warn,
+                severity=severity,
+                score=score,
+                message=f"Brute-force SSH probable depuis {source_ip}: {failure_count} echecs recents",
+                active_since=active_since,
+                detected_at=detected_at,
+            )
+            current_alerts.append(alert)
+            active_keys.add(alert_key)
+            if alert_key not in fired_alert_keys:
+                new_alerts.append(alert)
+                fired_alert_keys.add(alert_key)
+
+    if ssh_distributed_counts:
+        for vmid, counters in ssh_distributed_counts.items():
+            source_count = int(counters.get("source_count", 0))
+            failure_count = int(counters.get("failure_count", 0))
+            if source_count < settings.ssh_distributed_source_warn or failure_count < settings.ssh_auth_failure_warn:
+                continue
+            vm_status = vm_statuses.get(vmid, {"name": f"VM {vmid}"})
+            target_name = str(vm_status.get("name") or f"VM {vmid}")
+            alert_key = f"{node_name}:{vmid}:ssh_bruteforce_distributed"
+            active_since = active_breaches.setdefault(alert_key, detected_at)
+            severity = "critical" if failure_count >= settings.ssh_auth_failure_critical else "medium"
+            score = min(100, 72 + (source_count * 4) + int((failure_count / settings.ssh_auth_failure_critical) * 16))
+            alert = build_signal_alert(
+                node_name=node_name,
+                vmid=vmid,
+                target_name=target_name,
+                event_type="ssh_bruteforce_distributed",
+                metric="ssh_source_count",
+                value=source_count,
+                threshold=settings.ssh_distributed_source_warn,
+                severity=severity,
+                score=score,
+                message=(
+                    f"Brute-force SSH distribue probable: {failure_count} echecs "
+                    f"depuis {source_count} sources"
+                ),
+                active_since=active_since,
+                detected_at=detected_at,
+            )
+            current_alerts.append(alert)
+            active_keys.add(alert_key)
+            if alert_key not in fired_alert_keys:
+                new_alerts.append(alert)
+                fired_alert_keys.add(alert_key)
+
+    if ssh_success_after_failures:
+        for signal in ssh_success_after_failures:
+            vmid = int(signal["vmid"])
+            source_ip = str(signal.get("source_ip") or "unknown")
+            username = str(signal.get("username") or "unknown")
+            failure_count = int(signal.get("failure_count", 0))
+            if failure_count < settings.ssh_success_after_failure_warn:
+                continue
+            vm_status = vm_statuses.get(vmid, {"name": f"VM {vmid}"})
+            target_name = str(vm_status.get("name") or f"VM {vmid}")
+            alert_key = f"{node_name}:{vmid}:ssh_success_after_failures:{source_ip}:{username}"
+            active_since = active_breaches.setdefault(alert_key, detected_at)
+            alert = build_signal_alert(
+                node_name=node_name,
+                vmid=vmid,
+                target_name=target_name,
+                event_type="ssh_success_after_failures",
+                metric="ssh_success_after_failures",
+                value=failure_count,
+                threshold=settings.ssh_success_after_failure_warn,
+                severity="critical",
+                score=98,
+                message=(
+                    f"Connexion SSH reussie apres {failure_count} echecs "
+                    f"pour {username} depuis {source_ip}"
+                ),
+                active_since=active_since,
+                detected_at=detected_at,
+            )
+            current_alerts.append(alert)
+            active_keys.add(alert_key)
+            if alert_key not in fired_alert_keys:
+                new_alerts.append(alert)
+                fired_alert_keys.add(alert_key)
+
     return DetectionEvaluation(current_alerts=current_alerts, new_alerts=new_alerts, active_keys=active_keys)
 
 
@@ -272,6 +378,9 @@ def evaluate_detection(
     active_breaches: Dict[str, datetime],
     fired_alert_keys: Set[str],
     ssh_failure_counts: Optional[Dict[int, int]] = None,
+    ssh_source_failure_counts: Optional[Dict[Tuple[int, str], int]] = None,
+    ssh_distributed_counts: Optional[Dict[int, Dict[str, int]]] = None,
+    ssh_success_after_failures: Optional[List[Dict[str, object]]] = None,
     now: Optional[datetime] = None,
 ) -> DetectionEvaluation:
     detected_at = now or datetime.now()
@@ -321,12 +430,15 @@ def evaluate_detection(
                 new_alerts.append(alert)
                 fired_alert_keys.add(alert_key)
 
-    if ssh_failure_counts:
+    if ssh_failure_counts is not None:
         ssh_evaluation = evaluate_ssh_signals(
             settings,
             node_name,
             vm_statuses,
             ssh_failure_counts,
+            ssh_source_failure_counts,
+            ssh_distributed_counts,
+            ssh_success_after_failures,
             active_breaches,
             fired_alert_keys,
             detected_at,

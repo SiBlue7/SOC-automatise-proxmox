@@ -21,6 +21,7 @@ L'approche reste volontairement progressive :
 - `syslog_collector.py` : reception centralisee des logs SSH/auth envoyes par les VM.
 - `ssh_log_collector.py` : fallback optionnel par connexion SSH, desactive par defaut.
 - `auth_log_parser.py` : parsing commun des evenements SSH.
+- `incident_engine.py` : regroupement des alertes en incidents correles.
 - `config.py` : lecture et validation du `.env`.
 - `proxmox_client.py` : connexion API et collecte Proxmox.
 - `detection.py` : regles d'alertes, score et severite.
@@ -71,6 +72,9 @@ SSH_LOG_LOOKBACK_MINUTES=10
 SSH_LOG_MAX_LINES=300
 SSH_AUTH_FAILURE_WARN=5
 SSH_AUTH_FAILURE_CRITICAL=20
+SSH_SOURCE_FAILURE_WARN=5
+SSH_DISTRIBUTED_SOURCE_WARN=3
+SSH_SUCCESS_AFTER_FAILURE_WARN=3
 SSH_CORRELATION_CPU_THRESHOLD=50
 SSH_CORRELATION_WINDOW_SECONDS=300
 ```
@@ -152,6 +156,7 @@ Le service `proxmox-collector` continue de collecter meme si aucune page Streaml
   - duree minimale avant alerte ;
   - score d'anomalie et severite faible/moyen/critique.
 - Vue `Incidents / Alertes` :
+  - incidents correles avec statuts `open`, `acknowledged`, `contained`, `resolved` ;
   - filtres par noeud, VM, severite et statut ;
   - timeline d'incident ;
   - indicateurs MTTD, MTTR, volume d'alertes et actions.
@@ -163,8 +168,28 @@ Le service `proxmox-collector` continue de collecter meme si aucune page Streaml
 - Correlation SSH :
   - collecte des echecs SSH via Syslog centralise ;
   - alerte `ssh_bruteforce_suspected` si les echecs depassent le seuil ;
+  - alerte `ssh_bruteforce_source` si une meme IP source depasse le seuil ;
+  - alerte `ssh_bruteforce_distributed` si plusieurs sources attaquent la meme VM ;
+  - alerte `ssh_success_after_failures` si une connexion reussit apres des echecs ;
   - alerte `ssh_cpu_correlated` si les echecs SSH coincident avec une pression CPU ;
   - onglet `Logs SSH / Syslog` pour auditer les evenements collectes.
+
+## Incident Engine
+
+Le moteur d'incidents regroupe les alertes proches dans un objet exploitable par l'analyste :
+
+- `ssh_intrusion` : brute-force, brute-force par source, brute-force distribue, succes apres echecs, correlation SSH/CPU.
+- `resource_pressure` : pression CPU/RAM sur une VM.
+- `host_pressure` : pression ressources sur le noeud Proxmox.
+
+Les incidents sont crees automatiquement par `proxmox-collector`, puis visibles dans `Incidents / Alertes`. L'analyste peut les passer en :
+
+- `open` : incident detecte, pas encore traite ;
+- `acknowledged` : incident vu et pris en compte ;
+- `contained` : action de confinement realisee ou en cours ;
+- `resolved` : incident clos.
+
+Cette couche reduit la surcharge analyste : plusieurs alertes techniques peuvent etre lues comme un seul incident coherent.
 
 ## Protocole experimental
 
@@ -178,10 +203,12 @@ Scenario reproductible pour une demonstration de soutenance avec collecte contin
 6. Observer l'apparition de l'alerte dans `Supervision` puis `Incidents / Alertes`.
 7. Lancer un brute-force SSH controle pour verifier la correlation Syslog.
 8. Noter le score, la severite et l'horodatage de detection.
-9. Confirmer l'isolement dans `Reponse active` si le scenario le demande.
-10. Verifier que `net0` passe en etat isole.
-11. Restaurer le reseau.
-12. Utiliser la timeline, les logs SSH et le journal d'audit comme preuve experimentale.
+9. Verifier la creation d'un incident `ssh_intrusion`.
+10. Passer l'incident en `acknowledged`.
+11. Confirmer l'isolement dans `Reponse active` si le scenario le demande.
+12. Passer l'incident en `contained`, verifier que `net0` passe en etat isole.
+13. Restaurer le reseau, puis passer l'incident en `resolved`.
+14. Utiliser la timeline, les logs SSH et le journal d'audit comme preuve experimentale.
 
 Exemple Linux pour generer une charge CPU de demonstration dans une VM de test :
 

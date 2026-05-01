@@ -4,6 +4,7 @@ from typing import Dict, Set
 
 from config import AppConfig, read_settings
 from detection import evaluate_detection
+from incident_engine import upsert_incident_for_alert
 from proxmox_client import (
     connect_proxmox,
     fetch_node_status,
@@ -12,13 +13,17 @@ from proxmox_client import (
     fetch_vm_statuses,
 )
 from storage import (
+    fetch_ssh_distributed_counts,
     fetch_ssh_failure_counts,
+    fetch_ssh_source_failure_counts,
+    fetch_ssh_success_after_failures,
     init_db,
     insert_host_metric,
     insert_vm_metric,
     insert_ssh_events,
     record_collector_run,
     resolve_alerts_for_node,
+    sync_incident_statuses_for_node,
     upsert_alert,
 )
 from ssh_log_collector import collect_target_logs, validate_ssh_setup
@@ -66,6 +71,9 @@ def run_collection_cycle(
             ssh_events_inserted = collect_ssh_events_for_node(settings, node_name, vm_statuses, sample_time)
             since = sample_time - timedelta(seconds=settings.ssh_correlation_window_seconds)
             ssh_failure_counts = fetch_ssh_failure_counts(settings.db_path, node_name, since)
+            ssh_source_failure_counts = fetch_ssh_source_failure_counts(settings.db_path, node_name, since)
+            ssh_distributed_counts = fetch_ssh_distributed_counts(settings.db_path, node_name, since)
+            ssh_success_after_failures = fetch_ssh_success_after_failures(settings.db_path, node_name, since)
             for target in settings.ssh_log_targets:
                 if target.vmid in vm_statuses:
                     ssh_failure_counts.setdefault(target.vmid, 0)
@@ -78,11 +86,16 @@ def run_collection_cycle(
                 active_breaches,
                 fired_alert_keys,
                 ssh_failure_counts=ssh_failure_counts,
+                ssh_source_failure_counts=ssh_source_failure_counts,
+                ssh_distributed_counts=ssh_distributed_counts,
+                ssh_success_after_failures=ssh_success_after_failures,
                 now=sample_time,
             )
             for alert in evaluation.current_alerts:
-                upsert_alert(settings.db_path, alert)
+                alert_id, _ = upsert_alert(settings.db_path, alert)
+                upsert_incident_for_alert(settings.db_path, alert_id, alert, sample_time)
             resolve_alerts_for_node(settings.db_path, node_name, evaluation.active_keys, sample_time)
+            sync_incident_statuses_for_node(settings.db_path, node_name, sample_time)
 
             nodes_seen += 1
             vm_count += len(vm_statuses)

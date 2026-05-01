@@ -17,6 +17,8 @@ from proxmox_client import (
 from storage import (
     fetch_actions,
     fetch_alerts,
+    fetch_incident_timeline,
+    fetch_incidents,
     fetch_latest_collector_run,
     fetch_latest_ssh_event,
     fetch_latest_syslog_run,
@@ -27,6 +29,7 @@ from storage import (
     insert_host_metric,
     insert_vm_metric,
     resolve_alerts_for_node,
+    update_incident_status,
     upsert_alert,
 )
 
@@ -201,11 +204,15 @@ def render_soc_metrics(settings: AppConfig) -> None:
     metrics = fetch_soc_metrics(settings.db_path)
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Alertes actives", metrics["active_alerts"])
-    col2.metric("Alertes total", metrics["total_alerts"])
-    col3.metric("Actions journalisees", metrics["total_actions"])
-    col4.metric("Evenements SSH", metrics["total_ssh_events"])
-    col5.metric("MTTD moyen", format_duration(metrics["avg_mttd"]))
-    st.caption(f"MTTR moyen observe: {format_duration(metrics['avg_mttr'])}")
+    col2.metric("Incidents ouverts", metrics["active_incidents"])
+    col3.metric("Alertes total", metrics["total_alerts"])
+    col4.metric("Actions journalisees", metrics["total_actions"])
+    col5.metric("Evenements SSH", metrics["total_ssh_events"])
+    st.caption(
+        f"Incidents total: {metrics['total_incidents']} | "
+        f"MTTD moyen: {format_duration(metrics['avg_mttd'])} | "
+        f"MTTR moyen observe: {format_duration(metrics['avg_mttr'])}"
+    )
 
 
 def render_collector_status(settings: AppConfig) -> None:
@@ -314,6 +321,31 @@ def format_alerts_dataframe(alerts: List[Dict[str, object]]) -> pd.DataFrame:
     return frame
 
 
+def format_incidents_dataframe(incidents: List[Dict[str, object]]) -> pd.DataFrame:
+    frame = pd.DataFrame(incidents)
+    if frame.empty:
+        return frame
+    frame = frame.rename(
+        columns={
+            "id": "ID",
+            "first_seen": "Premiere detection",
+            "last_seen": "Derniere activite",
+            "resolved_at": "Resolution",
+            "node": "Noeud",
+            "vmid": "VMID",
+            "category": "Categorie",
+            "title": "Titre",
+            "severity": "Severite",
+            "score": "Score",
+            "status": "Statut",
+            "source_ip": "Source",
+            "username": "Utilisateur",
+            "summary": "Synthese",
+        }
+    )
+    return frame
+
+
 def format_actions_dataframe(actions: List[Dict[str, object]]) -> pd.DataFrame:
     frame = pd.DataFrame(actions)
     if frame.empty:
@@ -360,14 +392,63 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
     render_soc_metrics(settings)
     st.divider()
 
-    filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+    filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns(5)
     node_filter = filter_col1.selectbox("Filtre noeud", options=["Tous", *node_names])
     vm_choices = {"Toutes": None}
     for vmid in sorted(vm_statuses):
         vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
     vm_filter_label = filter_col2.selectbox("Filtre VM", options=list(vm_choices.keys()))
     severity_filter = filter_col3.selectbox("Severite", options=["Toutes", "critical", "medium", "low"])
-    status_filter = filter_col4.selectbox("Statut", options=["Tous", "active", "resolved"])
+    incident_status_filter = filter_col4.selectbox(
+        "Statut incident",
+        options=["Tous", "open", "acknowledged", "contained", "resolved"],
+    )
+    status_filter = filter_col5.selectbox("Statut alerte", options=["Tous", "active", "resolved"])
+
+    incidents = fetch_incidents(
+        settings.db_path,
+        node=node_filter,
+        vmid=vm_choices[vm_filter_label],
+        severity=severity_filter,
+        status=incident_status_filter,
+    )
+    incidents_frame = format_incidents_dataframe(incidents)
+    st.subheader("Incidents correles")
+    if incidents_frame.empty:
+        st.info("Aucun incident correle ne correspond aux filtres.")
+    else:
+        st.dataframe(incidents_frame, use_container_width=True, hide_index=True)
+        incident_ids = [int(incident["id"]) for incident in incidents]
+        selected_incident_id = st.selectbox("Timeline incident correle", options=incident_ids)
+        selected_incident = next(incident for incident in incidents if int(incident["id"]) == selected_incident_id)
+
+        st.caption(f"Statut courant: {selected_incident['status']} | {selected_incident['summary']}")
+        status_col1, status_col2, status_col3, status_col4 = st.columns(4)
+        status_actions = [
+            (status_col1, "Reouvrir", "open"),
+            (status_col2, "Acquitter", "acknowledged"),
+            (status_col3, "Contenir", "contained"),
+            (status_col4, "Resoudre", "resolved"),
+        ]
+        for column, label, target_status in status_actions:
+            with column:
+                if st.button(
+                    label,
+                    use_container_width=True,
+                    disabled=selected_incident["status"] == target_status,
+                    key=f"incident_status_{selected_incident_id}_{target_status}",
+                ):
+                    update_incident_status(settings.db_path, selected_incident_id, target_status)
+                    st.rerun()
+
+        timeline = fetch_incident_timeline(settings.db_path, selected_incident_id)
+        timeline_frame = pd.DataFrame(timeline).rename(
+            columns={"timestamp": "Horodatage", "event": "Evenement", "detail": "Detail"}
+        )
+        st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.subheader("Alertes brutes")
 
     alerts = fetch_alerts(
         settings.db_path,

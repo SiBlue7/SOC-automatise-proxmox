@@ -48,6 +48,9 @@ class AppConfig:
     ssh_log_max_lines: int
     ssh_auth_failure_warn: int
     ssh_auth_failure_critical: int
+    ssh_source_failure_warn: int
+    ssh_distributed_source_warn: int
+    ssh_success_after_failure_warn: int
     ssh_correlation_cpu_threshold: float
     ssh_correlation_window_seconds: int
     syslog_enabled: bool
@@ -225,6 +228,9 @@ def read_settings() -> AppConfig:
     ssh_auth_failure_critical = parse_int_env("SSH_AUTH_FAILURE_CRITICAL", 20, minimum=1)
     if ssh_auth_failure_warn >= ssh_auth_failure_critical:
         raise ValueError("SSH_AUTH_FAILURE_WARN doit etre inferieur a SSH_AUTH_FAILURE_CRITICAL.")
+    ssh_source_failure_warn = parse_int_env("SSH_SOURCE_FAILURE_WARN", ssh_auth_failure_warn, minimum=1)
+    ssh_distributed_source_warn = parse_int_env("SSH_DISTRIBUTED_SOURCE_WARN", 3, minimum=2)
+    ssh_success_after_failure_warn = parse_int_env("SSH_SUCCESS_AFTER_FAILURE_WARN", 3, minimum=1)
     syslog_default_node = os.getenv("SYSLOG_DEFAULT_NODE", "pve").strip() or "pve"
 
     return AppConfig(
@@ -253,6 +259,9 @@ def read_settings() -> AppConfig:
         ssh_log_max_lines=parse_int_env("SSH_LOG_MAX_LINES", 300, minimum=20),
         ssh_auth_failure_warn=ssh_auth_failure_warn,
         ssh_auth_failure_critical=ssh_auth_failure_critical,
+        ssh_source_failure_warn=ssh_source_failure_warn,
+        ssh_distributed_source_warn=ssh_distributed_source_warn,
+        ssh_success_after_failure_warn=ssh_success_after_failure_warn,
         ssh_correlation_cpu_threshold=parse_float_env("SSH_CORRELATION_CPU_THRESHOLD", 50.0),
         ssh_correlation_window_seconds=parse_int_env("SSH_CORRELATION_WINDOW_SECONDS", 300, minimum=30),
         syslog_enabled=parse_bool(os.getenv("SYSLOG_ENABLED"), default=True),

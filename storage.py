@@ -133,6 +133,39 @@ def init_db(db_path: str) -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS incidents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_key TEXT NOT NULL UNIQUE,
+                first_seen TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                resolved_at TEXT,
+                node TEXT NOT NULL,
+                vmid INTEGER,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                source_ip TEXT,
+                username TEXT,
+                summary TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS incident_alerts (
+                incident_id INTEGER NOT NULL,
+                alert_id INTEGER NOT NULL,
+                linked_at TEXT NOT NULL,
+                PRIMARY KEY (incident_id, alert_id),
+                FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+                FOREIGN KEY (alert_id) REFERENCES alerts(id) ON DELETE CASCADE
+            )
+            """
+        )
         ensure_column(connection, "ssh_events", "ingest_method", "TEXT NOT NULL DEFAULT 'ssh'")
         ensure_column(connection, "ssh_events", "hostname", "TEXT")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_metrics_node_time ON metrics(node, timestamp)")
@@ -144,6 +177,9 @@ def init_db(db_path: str) -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_time ON ssh_events(timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_vmid_time ON ssh_events(vmid, timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_type_time ON ssh_events(event_type, timestamp)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_incidents_status_time ON incidents(status, first_seen)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_incidents_node_vmid ON incidents(node, vmid)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_incident_alerts_alert ON incident_alerts(alert_id)")
 
 
 def insert_host_metric(db_path: str, node: str, node_status: Dict[str, object], timestamp: datetime) -> None:
@@ -440,6 +476,82 @@ def fetch_ssh_failure_counts(db_path: str, node: str, since: datetime) -> Dict[i
     return {int(row["vmid"]): int(row["count"]) for row in rows}
 
 
+def fetch_ssh_source_failure_counts(db_path: str, node: str, since: datetime) -> Dict[Tuple[int, str], int]:
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT vmid, source_ip, COUNT(*) AS count
+            FROM ssh_events
+            WHERE node = ?
+              AND collected_at >= ?
+              AND source_ip IS NOT NULL
+              AND source_ip != ''
+              AND event_type IN ('failed_password', 'invalid_user')
+            GROUP BY vmid, source_ip
+            """,
+            (node, iso_timestamp(since)),
+        ).fetchall()
+    return {(int(row["vmid"]), str(row["source_ip"])): int(row["count"]) for row in rows}
+
+
+def fetch_ssh_distributed_counts(db_path: str, node: str, since: datetime) -> Dict[int, Dict[str, int]]:
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT vmid,
+                   COUNT(*) AS failure_count,
+                   COUNT(DISTINCT source_ip) AS source_count,
+                   COUNT(DISTINCT username) AS username_count
+            FROM ssh_events
+            WHERE node = ?
+              AND collected_at >= ?
+              AND source_ip IS NOT NULL
+              AND source_ip != ''
+              AND event_type IN ('failed_password', 'invalid_user')
+            GROUP BY vmid
+            """,
+            (node, iso_timestamp(since)),
+        ).fetchall()
+    return {
+        int(row["vmid"]): {
+            "failure_count": int(row["failure_count"]),
+            "source_count": int(row["source_count"]),
+            "username_count": int(row["username_count"]),
+        }
+        for row in rows
+    }
+
+
+def fetch_ssh_success_after_failures(db_path: str, node: str, since: datetime) -> List[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT success.vmid,
+                   success.source_ip,
+                   success.username,
+                   COUNT(failure.id) AS failure_count,
+                   MAX(success.collected_at) AS success_at
+            FROM ssh_events AS success
+            JOIN ssh_events AS failure
+              ON failure.node = success.node
+             AND failure.vmid = success.vmid
+             AND failure.source_ip = success.source_ip
+             AND COALESCE(failure.username, '') = COALESCE(success.username, '')
+             AND failure.event_type IN ('failed_password', 'invalid_user')
+             AND failure.collected_at >= ?
+             AND failure.collected_at <= success.collected_at
+            WHERE success.node = ?
+              AND success.collected_at >= ?
+              AND success.event_type = 'accepted_password'
+              AND success.source_ip IS NOT NULL
+              AND success.source_ip != ''
+            GROUP BY success.vmid, success.source_ip, success.username
+            """,
+            (iso_timestamp(since), node, iso_timestamp(since)),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
 def fetch_recent_ssh_events(
     db_path: str,
     limit: int = 100,
@@ -550,11 +662,294 @@ def fetch_actions(db_path: str, limit: int = 100) -> List[Dict[str, object]]:
     return rows_to_dicts(rows)
 
 
+SEVERITY_RANK = {"low": 1, "medium": 2, "critical": 3}
+
+
+def upsert_incident(
+    db_path: str,
+    incident_key: str,
+    node: str,
+    vmid: Optional[int],
+    category: str,
+    title: str,
+    severity: str,
+    score: int,
+    summary: str,
+    first_seen: datetime,
+    last_seen: datetime,
+    source_ip: Optional[str] = None,
+    username: Optional[str] = None,
+) -> int:
+    with connect_db(db_path) as connection:
+        existing = connection.execute(
+            """
+            SELECT id, severity, score, status
+            FROM incidents
+            WHERE node = ?
+              AND category = ?
+              AND status != 'resolved'
+              AND ((vmid IS NULL AND ? IS NULL) OR vmid = ?)
+            ORDER BY last_seen DESC
+            LIMIT 1
+            """,
+            (node, category, vmid, vmid),
+        ).fetchone()
+        if existing is None:
+            existing = connection.execute(
+                """
+                SELECT id, severity, score, status
+                FROM incidents
+                WHERE incident_key = ?
+                """,
+                (incident_key,),
+            ).fetchone()
+        if existing:
+            incident_id = int(existing["id"])
+            current_severity = str(existing["severity"])
+            current_score = int(existing["score"])
+            current_status = str(existing["status"])
+            next_severity = severity
+            if SEVERITY_RANK.get(current_severity, 0) > SEVERITY_RANK.get(severity, 0):
+                next_severity = current_severity
+            next_score = max(current_score, score)
+            next_status = "open" if current_status == "resolved" else current_status
+            connection.execute(
+                """
+                UPDATE incidents
+                SET last_seen = ?, resolved_at = NULL, severity = ?, score = ?,
+                    status = ?, source_ip = COALESCE(source_ip, ?),
+                    username = COALESCE(username, ?), summary = ?
+                WHERE id = ?
+                """,
+                (
+                    iso_timestamp(last_seen),
+                    next_severity,
+                    next_score,
+                    next_status,
+                    source_ip,
+                    username,
+                    summary,
+                    incident_id,
+                ),
+            )
+            return incident_id
+
+        cursor = connection.execute(
+            """
+            INSERT INTO incidents (
+                incident_key, first_seen, last_seen, resolved_at, node, vmid,
+                category, title, severity, score, status, source_ip, username, summary
+            )
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+            """,
+            (
+                incident_key,
+                iso_timestamp(first_seen),
+                iso_timestamp(last_seen),
+                node,
+                vmid,
+                category,
+                title,
+                severity,
+                score,
+                source_ip,
+                username,
+                summary,
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def link_alert_to_incident(
+    db_path: str,
+    incident_id: int,
+    alert_id: int,
+    linked_at: Optional[datetime] = None,
+) -> None:
+    event_time = linked_at or datetime.now()
+    with connect_db(db_path) as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO incident_alerts (incident_id, alert_id, linked_at)
+            VALUES (?, ?, ?)
+            """,
+            (incident_id, alert_id, iso_timestamp(event_time)),
+        )
+
+
+def sync_incident_statuses_for_node(db_path: str, node: str, resolved_at: datetime) -> None:
+    with connect_db(db_path) as connection:
+        connection.execute(
+            """
+            UPDATE incidents
+            SET status = 'resolved', resolved_at = ?
+            WHERE node = ?
+              AND status IN ('open', 'acknowledged')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM incident_alerts
+                  JOIN alerts ON alerts.id = incident_alerts.alert_id
+                  WHERE incident_alerts.incident_id = incidents.id
+                    AND alerts.status = 'active'
+              )
+            """,
+            (iso_timestamp(resolved_at), node),
+        )
+
+
+def update_incident_status(
+    db_path: str,
+    incident_id: int,
+    status: str,
+    timestamp: Optional[datetime] = None,
+) -> None:
+    if status not in {"open", "acknowledged", "contained", "resolved"}:
+        raise ValueError("Statut incident invalide.")
+    event_time = timestamp or datetime.now()
+    resolved_at = iso_timestamp(event_time) if status == "resolved" else None
+    with connect_db(db_path) as connection:
+        connection.execute(
+            """
+            UPDATE incidents
+            SET status = ?, resolved_at = CASE WHEN ? = 'resolved' THEN ? ELSE NULL END
+            WHERE id = ?
+            """,
+            (status, status, resolved_at, incident_id),
+        )
+
+
+def fetch_incidents(
+    db_path: str,
+    limit: int = 100,
+    node: Optional[str] = None,
+    vmid: Optional[int] = None,
+    severity: Optional[str] = None,
+    status: Optional[str] = None,
+) -> List[Dict[str, object]]:
+    clauses = []
+    params: List[object] = []
+    if node and node != "Tous":
+        clauses.append("node = ?")
+        params.append(node)
+    if vmid is not None:
+        clauses.append("vmid = ?")
+        params.append(vmid)
+    if severity and severity != "Toutes":
+        clauses.append("severity = ?")
+        params.append(severity)
+    if status and status != "Tous":
+        clauses.append("status = ?")
+        params.append(status)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT id, incident_key, first_seen, last_seen, resolved_at, node, vmid,
+                   category, title, severity, score, status, source_ip, username, summary
+            FROM incidents
+            {where_sql}
+            ORDER BY
+                CASE status
+                    WHEN 'open' THEN 4
+                    WHEN 'acknowledged' THEN 3
+                    WHEN 'contained' THEN 2
+                    ELSE 1
+                END DESC,
+                CASE severity
+                    WHEN 'critical' THEN 3
+                    WHEN 'medium' THEN 2
+                    WHEN 'low' THEN 1
+                    ELSE 0
+                END DESC,
+                last_seen DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def fetch_incident_timeline(db_path: str, incident_id: int) -> List[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        incident = connection.execute(
+            """
+            SELECT id, first_seen, resolved_at, node, vmid, title, summary, status
+            FROM incidents
+            WHERE id = ?
+            """,
+            (incident_id,),
+        ).fetchone()
+        if incident is None:
+            return []
+
+        rows = [
+            {
+                "timestamp": incident["first_seen"],
+                "event": "Incident cree",
+                "detail": f"{incident['title']} | {incident['summary']}",
+            }
+        ]
+        alert_rows = connection.execute(
+            """
+            SELECT alerts.first_seen, alerts.event_type, alerts.severity, alerts.score, alerts.message
+            FROM incident_alerts
+            JOIN alerts ON alerts.id = incident_alerts.alert_id
+            WHERE incident_alerts.incident_id = ?
+            ORDER BY alerts.first_seen
+            """,
+            (incident_id,),
+        ).fetchall()
+        for alert in alert_rows:
+            rows.append(
+                {
+                    "timestamp": alert["first_seen"],
+                    "event": f"Alerte {alert['event_type']}",
+                    "detail": f"{alert['severity']} score {alert['score']} | {alert['message']}",
+                }
+            )
+
+        action_rows = connection.execute(
+            """
+            SELECT timestamp, action, result, message
+            FROM actions
+            WHERE node = ?
+              AND vmid = ?
+              AND timestamp >= ?
+            ORDER BY timestamp
+            """,
+            (incident["node"], incident["vmid"], incident["first_seen"]),
+        ).fetchall()
+        for action in action_rows:
+            rows.append(
+                {
+                    "timestamp": action["timestamp"],
+                    "event": f"Action {action['action']}",
+                    "detail": f"{action['result']} | {action['message']}",
+                }
+            )
+
+        if incident["resolved_at"]:
+            rows.append(
+                {
+                    "timestamp": incident["resolved_at"],
+                    "event": "Incident resolu",
+                    "detail": f"Statut final: {incident['status']}",
+                }
+            )
+
+    return sorted(rows, key=lambda row: str(row["timestamp"]))
+
+
 def fetch_soc_metrics(db_path: str) -> Dict[str, object]:
     with connect_db(db_path) as connection:
         active_alerts = connection.execute(
             "SELECT COUNT(*) AS count FROM alerts WHERE status = 'active'"
         ).fetchone()["count"]
+        active_incidents = connection.execute(
+            "SELECT COUNT(*) AS count FROM incidents WHERE status IN ('open', 'acknowledged', 'contained')"
+        ).fetchone()["count"]
+        total_incidents = connection.execute("SELECT COUNT(*) AS count FROM incidents").fetchone()["count"]
         total_alerts = connection.execute("SELECT COUNT(*) AS count FROM alerts").fetchone()["count"]
         total_actions = connection.execute("SELECT COUNT(*) AS count FROM actions").fetchone()["count"]
         total_ssh_events = connection.execute("SELECT COUNT(*) AS count FROM ssh_events").fetchone()["count"]
@@ -587,6 +982,8 @@ def fetch_soc_metrics(db_path: str) -> Dict[str, object]:
 
     return {
         "active_alerts": int(active_alerts or 0),
+        "active_incidents": int(active_incidents or 0),
+        "total_incidents": int(total_incidents or 0),
         "total_alerts": int(total_alerts or 0),
         "total_actions": int(total_actions or 0),
         "total_ssh_events": int(total_ssh_events or 0),
