@@ -648,6 +648,31 @@ def fetch_alerts(
     return rows_to_dicts(rows)
 
 
+def fetch_incident_alerts(db_path: str, incident_id: int) -> List[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT alerts.id, alerts.first_seen, alerts.last_seen, alerts.resolved_at,
+                   alerts.node, alerts.vmid, alerts.scope, alerts.event_type,
+                   alerts.metric, alerts.value, alerts.threshold, alerts.severity,
+                   alerts.score, alerts.status, alerts.message
+            FROM incident_alerts
+            JOIN alerts ON alerts.id = incident_alerts.alert_id
+            WHERE incident_alerts.incident_id = ?
+            ORDER BY
+                CASE alerts.severity
+                    WHEN 'critical' THEN 3
+                    WHEN 'medium' THEN 2
+                    WHEN 'low' THEN 1
+                    ELSE 0
+                END DESC,
+                alerts.first_seen DESC
+            """,
+            (incident_id,),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
 def fetch_actions(db_path: str, limit: int = 100) -> List[Dict[str, object]]:
     with connect_db(db_path) as connection:
         rows = connection.execute(

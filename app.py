@@ -18,6 +18,7 @@ from proxmox_client import (
 from storage import (
     fetch_actions,
     fetch_alerts,
+    fetch_incident_alerts,
     fetch_incident_timeline,
     fetch_incidents,
     fetch_latest_collector_run,
@@ -492,6 +493,11 @@ def compact_actions_frame(actions: List[Dict[str, object]]) -> pd.DataFrame:
     return frame[[column for column in wanted if column in frame.columns]]
 
 
+def open_incident_workspace(incident_id: int) -> None:
+    st.session_state["active_incident_id"] = incident_id
+    st.session_state["navigation"] = "Poste incident"
+
+
 def render_incident_cards(incidents: List[Dict[str, object]], limit: int = 3) -> None:
     if not incidents:
         st.success("Aucun incident ouvert a traiter.")
@@ -521,6 +527,15 @@ def render_incident_cards(incidents: List[Dict[str, object]], limit: int = 3) ->
             """,
             unsafe_allow_html=True,
         )
+        action_col, _ = st.columns([1, 2])
+        with action_col:
+            if st.button(
+                "Traiter",
+                key=f"soc_open_incident_{incident['id']}",
+                use_container_width=True,
+            ):
+                open_incident_workspace(int(incident["id"]))
+                st.rerun()
 
 
 def incident_status_label(status: str) -> str:
@@ -553,10 +568,176 @@ def incident_next_step(status: str) -> Dict[str, str]:
     return steps.get(status, steps["open"])
 
 
+def render_incident_workflow_controls(
+    settings: AppConfig,
+    incident: Dict[str, object],
+    key_prefix: str,
+    show_workspace_button: bool = True,
+) -> None:
+    incident_id = int(incident["id"])
+    status = str(incident["status"])
+    next_step = incident_next_step(status)
+    st.caption(next_step["message"])
+
+    if show_workspace_button:
+        action_col, workspace_col, secondary_col = st.columns([1.5, 1.5, 1])
+    else:
+        action_col, secondary_col = st.columns([2, 1])
+        workspace_col = None
+    with action_col:
+        if st.button(
+            next_step["label"],
+            type="primary" if status != "resolved" else "secondary",
+            use_container_width=True,
+            key=f"{key_prefix}_incident_next_{incident_id}_{next_step['target']}",
+        ):
+            update_incident_status(settings.db_path, incident_id, next_step["target"])
+            st.rerun()
+    if workspace_col is not None:
+        with workspace_col:
+            if st.button(
+                "Ouvrir dans le poste incident",
+                use_container_width=True,
+                key=f"{key_prefix}_incident_workspace_{incident_id}",
+            ):
+                open_incident_workspace(incident_id)
+                st.rerun()
+    with secondary_col:
+        if status in {"acknowledged", "contained"}:
+            if st.button(
+                "Revenir a nouveau",
+                use_container_width=True,
+                key=f"{key_prefix}_incident_back_open_{incident_id}",
+            ):
+                update_incident_status(settings.db_path, incident_id, "open")
+                st.rerun()
+
+
+def render_network_response_controls(
+    settings: AppConfig,
+    proxmox,
+    node_name: str,
+    vm_statuses: Dict[int, Dict[str, object]],
+    selected_vmid: Optional[int],
+    key_prefix: str,
+    incident_id: Optional[int] = None,
+) -> None:
+    if selected_vmid is None:
+        st.info("Cet incident n'est pas rattache a une VM: aucune action reseau directe n'est proposee.")
+        return
+
+    vm_name = str(vm_statuses.get(selected_vmid, {}).get("name") or f"VM {selected_vmid}")
+    selected_label = f"{selected_vmid} - {vm_name}"
+    protected = is_protected_vmid(selected_vmid, settings.protected_vmids)
+
+    action_feedback = st.session_state.get("action_feedback")
+    if action_feedback:
+        getattr(st, action_feedback["level"])(action_feedback["message"])
+
+    try:
+        network_state = get_net0_state(proxmox, node_name, selected_vmid)
+    except Exception as exc:
+        network_state = None
+        st.error(f"Impossible de lire l'etat de net0: {exc}")
+
+    state_col1, state_col2, state_col3 = st.columns(3)
+    if network_state:
+        if network_state.isolated is True:
+            state_value = "Isole"
+            state_tone = "danger"
+        elif network_state.isolated is False:
+            state_value = "Connecte"
+            state_tone = "success"
+        else:
+            state_value = "Inconnu"
+            state_tone = "warning"
+        with state_col1:
+            render_kpi_card("Etat net0", state_value, network_state.message, state_tone)
+    else:
+        with state_col1:
+            render_kpi_card("Etat net0", "Erreur", "Lecture impossible", "danger")
+    with state_col2:
+        render_kpi_card("VM cible", selected_vmid, selected_label, "neutral")
+    with state_col3:
+        render_kpi_card(
+            "Protection",
+            "Protegee" if protected else "Action possible",
+            "PROTECTED_VMIDS" if protected else "Confirmation requise",
+            "warning" if protected else "info",
+        )
+
+    if protected:
+        st.warning("Cette VM est protegee par PROTECTED_VMIDS: l'isolement est bloque.")
+
+    confirm_key = f"{key_prefix}_confirm_isolate_{node_name}_{selected_vmid}"
+    confirmed = st.checkbox(
+        f"Je confirme l'isolement reseau de la VM {selected_vmid} sur net0.",
+        key=confirm_key,
+        disabled=protected,
+    )
+
+    isolate_col, restore_col = st.columns(2)
+    action_result = None
+    can_isolate = bool(network_state and network_state.isolated is False and confirmed and not protected)
+    can_restore = bool(network_state and network_state.isolated is True)
+
+    with isolate_col:
+        if st.button(
+            "Isoler net0",
+            type="primary",
+            use_container_width=True,
+            disabled=not can_isolate,
+            key=f"{key_prefix}_isolate_{node_name}_{selected_vmid}",
+        ):
+            if protected:
+                message = f"Isolation bloquee: VM {selected_vmid} protegee."
+                insert_action(settings.db_path, node_name, selected_vmid, "isolate", "blocked", message, True)
+                action_result = ("error", message)
+            else:
+                try:
+                    success, message = set_vm_network_state(proxmox, node_name, selected_vmid, isolated=True)
+                    result = "success" if success else "error"
+                    insert_action(settings.db_path, node_name, selected_vmid, "isolate", result, message, protected)
+                    action_result = ("success" if success else "error", message)
+                    if success and incident_id is not None:
+                        st.session_state["incident_action_suggestion"] = {
+                            "incident_id": incident_id,
+                            "target": "contained",
+                        }
+                except Exception as exc:
+                    message = f"Echec de l'isolement sur la VM {selected_vmid}: {exc}"
+                    insert_action(settings.db_path, node_name, selected_vmid, "isolate", "error", message, protected)
+                    action_result = ("error", message)
+
+    with restore_col:
+        if st.button(
+            "Restaurer net0",
+            use_container_width=True,
+            disabled=not can_restore,
+            key=f"{key_prefix}_restore_{node_name}_{selected_vmid}",
+        ):
+            try:
+                success, message = set_vm_network_state(proxmox, node_name, selected_vmid, isolated=False)
+                result = "success" if success else "error"
+                insert_action(settings.db_path, node_name, selected_vmid, "restore", result, message, protected)
+                action_result = ("success" if success else "error", message)
+            except Exception as exc:
+                message = f"Echec de la restauration reseau sur la VM {selected_vmid}: {exc}"
+                insert_action(settings.db_path, node_name, selected_vmid, "restore", "error", message, protected)
+                action_result = ("error", message)
+
+    if action_result:
+        level, message = action_result
+        st.session_state["action_feedback"] = {"level": level, "message": message}
+        st.rerun()
+
+
 def ensure_session_state() -> None:
     st.session_state.setdefault("theme", "Sombre")
     st.session_state.setdefault("navigation", "Vue SOC")
     st.session_state.setdefault("refresh_label", "5 secondes")
+    st.session_state.setdefault("active_incident_id", None)
+    st.session_state.setdefault("incident_action_suggestion", None)
     st.session_state.setdefault("node_history", {})
     st.session_state.setdefault("vm_history", {})
     st.session_state.setdefault("action_feedback", None)
@@ -1207,28 +1388,7 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
         detail_col4.metric("Categorie", selected_incident["category"])
 
         st.info(str(selected_incident["summary"]))
-        next_step = incident_next_step(str(selected_incident["status"]))
-        st.caption(next_step["message"])
-
-        action_col, secondary_col = st.columns([2, 1])
-        with action_col:
-            if st.button(
-                next_step["label"],
-                type="primary" if selected_incident["status"] != "resolved" else "secondary",
-                use_container_width=True,
-                key=f"incident_next_{selected_incident_id}_{next_step['target']}",
-            ):
-                update_incident_status(settings.db_path, selected_incident_id, next_step["target"])
-                st.rerun()
-        with secondary_col:
-            if selected_incident["status"] in {"acknowledged", "contained"}:
-                if st.button(
-                    "Revenir a nouveau",
-                    use_container_width=True,
-                    key=f"incident_back_open_{selected_incident_id}",
-                ):
-                    update_incident_status(settings.db_path, selected_incident_id, "open")
-                    st.rerun()
+        render_incident_workflow_controls(settings, selected_incident, "incident_list")
         timeline = fetch_incident_timeline(settings.db_path, selected_incident_id)
         timeline_frame = pd.DataFrame(timeline).rename(
             columns={"timestamp": "Horodatage", "event": "Evenement", "detail": "Detail"}
@@ -1286,6 +1446,153 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
 
         timeline_frame = pd.DataFrame(timeline_rows).sort_values("Horodatage")
         st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
+
+
+def render_incident_workspace_tab(
+    settings: AppConfig,
+    proxmox,
+    selected_node: str,
+    vm_statuses: Dict[int, Dict[str, object]],
+) -> None:
+    render_section(
+        "Poste incident",
+        "Qualification, prise en charge, reponse active et preuves associees depuis un seul ecran.",
+    )
+
+    incidents = fetch_incidents(settings.db_path, limit=100)
+    if not incidents:
+        st.success("Aucun incident n'est disponible pour le moment.")
+        return
+
+    active_incident_id = st.session_state.get("active_incident_id")
+    known_ids = {int(incident["id"]) for incident in incidents}
+    if active_incident_id not in known_ids:
+        first_open = next((incident for incident in incidents if incident["status"] != "resolved"), incidents[0])
+        active_incident_id = int(first_open["id"])
+        st.session_state["active_incident_id"] = active_incident_id
+
+    incident_options = {
+        f"#{incident['id']} | {incident_status_label(str(incident['status']))} | "
+        f"{severity_badge(str(incident['severity']))} | {incident['title']}": int(incident["id"])
+        for incident in incidents
+    }
+    option_labels = list(incident_options.keys())
+    default_index = next(
+        (index for index, label in enumerate(option_labels) if incident_options[label] == active_incident_id),
+        0,
+    )
+    selected_incident_label = st.selectbox("Incident actif", options=option_labels, index=default_index)
+    selected_incident_id = incident_options[selected_incident_label]
+    st.session_state["active_incident_id"] = selected_incident_id
+    incident = next(incident for incident in incidents if int(incident["id"]) == selected_incident_id)
+
+    incident_node = str(incident["node"])
+    incident_vmid = int(incident["vmid"]) if incident.get("vmid") is not None else None
+    incident_vm_statuses = vm_statuses
+    if incident_node != selected_node:
+        try:
+            incident_qemu_vms = fetch_qemu_vms(proxmox, incident_node)
+            incident_vm_statuses = fetch_vm_statuses(proxmox, incident_node, incident_qemu_vms)
+        except Exception as exc:
+            incident_vm_statuses = {}
+            st.warning(f"Impossible de charger les VM du noeud {incident_node}: {exc}")
+
+    kpi_cols = st.columns(5)
+    with kpi_cols[0]:
+        render_kpi_card(
+            "Statut",
+            incident_status_label(str(incident["status"])),
+            "etat du dossier",
+            tone_for_status(str(incident["status"])),
+        )
+    with kpi_cols[1]:
+        render_kpi_card(
+            "Severite",
+            severity_badge(str(incident["severity"])),
+            f"score {incident['score']}",
+            tone_for_severity(str(incident["severity"])),
+        )
+    with kpi_cols[2]:
+        render_kpi_card("VMID", incident_vmid if incident_vmid is not None else "-", incident_node, "neutral")
+    with kpi_cols[3]:
+        render_kpi_card("Source", incident.get("source_ip") or "-", incident.get("username") or "utilisateur inconnu", "info")
+    with kpi_cols[4]:
+        render_kpi_card("Categorie", incident["category"], str(incident["title"]), "neutral")
+
+    st.info(str(incident["summary"]))
+
+    workflow_col, response_col = st.columns([1, 1.2])
+    with workflow_col:
+        render_section("Decision analyste", "Changer l'etat de l'incident sans quitter le dossier.")
+        render_incident_workflow_controls(settings, incident, "incident_workspace", show_workspace_button=False)
+
+        suggestion = st.session_state.get("incident_action_suggestion")
+        if (
+            suggestion
+            and suggestion.get("incident_id") == selected_incident_id
+            and str(incident["status"]) not in {"contained", "resolved"}
+        ):
+            st.success("Isolement journalise. Tu peux maintenant marquer l'incident comme contenu.")
+            if st.button(
+                "Marquer comme contenu",
+                type="primary",
+                use_container_width=True,
+                key=f"workspace_mark_contained_{selected_incident_id}",
+            ):
+                update_incident_status(settings.db_path, selected_incident_id, "contained")
+                st.session_state["incident_action_suggestion"] = None
+                st.rerun()
+
+    with response_col:
+        render_section("Reponse active", "Action Proxmox ciblee sur la VM de l'incident.")
+        render_network_response_controls(
+            settings,
+            proxmox,
+            incident_node,
+            incident_vm_statuses,
+            incident_vmid,
+            key_prefix=f"incident_workspace_{selected_incident_id}",
+            incident_id=selected_incident_id,
+        )
+
+    st.divider()
+    evidence_col, audit_col = st.columns([1.15, 1])
+    with evidence_col:
+        render_section("Timeline", "Detection, alertes liees, actions et resolution.")
+        timeline = fetch_incident_timeline(settings.db_path, selected_incident_id)
+        timeline_frame = pd.DataFrame(timeline).rename(
+            columns={"timestamp": "Horodatage", "event": "Evenement", "detail": "Detail"}
+        )
+        if timeline_frame.empty:
+            st.info("Aucun evenement de timeline pour cet incident.")
+        else:
+            st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
+
+        linked_alerts = fetch_incident_alerts(settings.db_path, selected_incident_id)
+        linked_alerts_frame = compact_alerts_frame(linked_alerts)
+        with st.expander("Alertes liees", expanded=False):
+            if linked_alerts_frame.empty:
+                st.info("Aucune alerte liee a cet incident.")
+            else:
+                st.dataframe(linked_alerts_frame, use_container_width=True, hide_index=True)
+
+    with audit_col:
+        render_section("Audit VM", "Actions recentes concernant la VM de l'incident.")
+        if incident_vmid is None:
+            st.info("Aucune VM rattachee a cet incident.")
+        else:
+            vm_actions = [
+                action
+                for action in fetch_actions(settings.db_path, limit=200)
+                if str(action.get("node")) == incident_node
+                and action.get("vmid") is not None
+                and int(action["vmid"]) == incident_vmid
+            ]
+            actions_frame = compact_actions_frame(vm_actions)
+            if actions_frame.empty:
+                st.info("Aucune action recente sur cette VM.")
+            else:
+                st.dataframe(actions_frame, use_container_width=True, hide_index=True)
 
 
 def render_host_tab(
@@ -1409,103 +1716,14 @@ def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_sta
     )
     selected_vmid = vm_options[selected_label]
     st.session_state["selected_vmid"] = selected_vmid
-    protected = is_protected_vmid(selected_vmid, settings.protected_vmids)
-
-    action_feedback = st.session_state.get("action_feedback")
-    if action_feedback:
-        getattr(st, action_feedback["level"])(action_feedback["message"])
-
-    try:
-        network_state = get_net0_state(proxmox, selected_node, selected_vmid)
-    except Exception as exc:
-        network_state = None
-        st.error(f"Impossible de lire l'etat de net0: {exc}")
-
-    state_col1, state_col2, state_col3 = st.columns(3)
-    if network_state:
-        if network_state.isolated is True:
-            state_value = "Isole"
-            state_tone = "danger"
-        elif network_state.isolated is False:
-            state_value = "Connecte"
-            state_tone = "success"
-        else:
-            state_value = "Inconnu"
-            state_tone = "warning"
-        with state_col1:
-            render_kpi_card("Etat net0", state_value, network_state.message, state_tone)
-    else:
-        with state_col1:
-            render_kpi_card("Etat net0", "Erreur", "Lecture impossible", "danger")
-    with state_col2:
-        render_kpi_card("VM cible", selected_vmid, selected_label, "neutral")
-    with state_col3:
-        render_kpi_card(
-            "Protection",
-            "Protegee" if protected else "Action possible",
-            "PROTECTED_VMIDS" if protected else "Confirmation requise",
-            "warning" if protected else "info",
-        )
-
-    if protected:
-        st.warning("Cette VM est protegee par PROTECTED_VMIDS: l'isolement est bloque.")
-
-    confirm_key = f"confirm_isolate_{selected_node}_{selected_vmid}"
-    confirmed = st.checkbox(
-        f"Je confirme l'isolement reseau de la VM {selected_vmid} sur net0.",
-        key=confirm_key,
-        disabled=protected,
+    render_network_response_controls(
+        settings,
+        proxmox,
+        selected_node,
+        vm_statuses,
+        selected_vmid,
+        key_prefix="manual_response",
     )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    isolate_col, restore_col = st.columns(2)
-    action_result = None
-
-    can_isolate = bool(network_state and network_state.isolated is False and confirmed and not protected)
-    can_restore = bool(network_state and network_state.isolated is True)
-
-    with isolate_col:
-        if st.button(
-            "ISOLER (couper net0)",
-            type="primary",
-            use_container_width=True,
-            disabled=not can_isolate,
-        ):
-            if protected:
-                message = f"Isolation bloquee: VM {selected_vmid} protegee."
-                insert_action(settings.db_path, selected_node, selected_vmid, "isolate", "blocked", message, True)
-                action_result = ("error", message)
-            else:
-                try:
-                    success, message = set_vm_network_state(proxmox, selected_node, selected_vmid, isolated=True)
-                    result = "success" if success else "error"
-                    insert_action(settings.db_path, selected_node, selected_vmid, "isolate", result, message, protected)
-                    action_result = ("success" if success else "error", message)
-                except Exception as exc:
-                    message = f"Echec de l'isolement sur la VM {selected_vmid}: {exc}"
-                    insert_action(settings.db_path, selected_node, selected_vmid, "isolate", "error", message, protected)
-                    action_result = ("error", message)
-
-    with restore_col:
-        if st.button(
-            "RESTAURER LE RESEAU",
-            use_container_width=True,
-            disabled=not can_restore,
-        ):
-            try:
-                success, message = set_vm_network_state(proxmox, selected_node, selected_vmid, isolated=False)
-                result = "success" if success else "error"
-                insert_action(settings.db_path, selected_node, selected_vmid, "restore", result, message, protected)
-                action_result = ("success" if success else "error", message)
-            except Exception as exc:
-                message = f"Echec de la restauration reseau sur la VM {selected_vmid}: {exc}"
-                insert_action(settings.db_path, selected_node, selected_vmid, "restore", "error", message, protected)
-                action_result = ("error", message)
-
-    if action_result:
-        level, message = action_result
-        st.session_state["action_feedback"] = {"level": level, "message": message}
-        st.rerun()
 
     st.divider()
     st.subheader("Journal d'audit recent")
@@ -1586,6 +1804,7 @@ ensure_session_state()
 
 navigation_options = [
     "Vue SOC",
+    "Poste incident",
     "Incidents",
     "Supervision Proxmox",
     "Reponse active",
@@ -1706,6 +1925,8 @@ def render_dashboard() -> None:
 
     if navigation == "Vue SOC":
         render_soc_overview(settings, selected_node, node_status, vm_statuses, evaluation.current_alerts)
+    elif navigation == "Poste incident":
+        render_incident_workspace_tab(settings, proxmox, selected_node, vm_statuses)
     elif navigation == "Incidents":
         render_incidents_tab(settings, node_names, vm_statuses)
     elif navigation == "Supervision Proxmox":
