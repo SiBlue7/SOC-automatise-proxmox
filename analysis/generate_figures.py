@@ -21,6 +21,10 @@ SCENARIO_COLORS = {
     "nmap": "#dbeafe",
     "hydra": "#fee2e2",
     "mixed": "#ede9fe",
+    "syslog_test": "#e0f2fe",
+    "ssh_failures": "#ffedd5",
+    "pause": "#f3f4f6",
+    "response": "#dcfce7",
 }
 
 
@@ -30,6 +34,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log", default="experiment_log.csv", help="Path to experiment log CSV.")
     parser.add_argument("--out", default="analysis_output", help="Output directory for figures and summary.")
     parser.add_argument("--vmid", type=int, default=None, help="Target VMID. Defaults to experiment log VMID or most sampled VM.")
+    parser.add_argument(
+        "--experiment-timezone",
+        default="Europe/Paris",
+        help="Timezone used by start_time/end_time in experiment_log.csv. Use UTC to disable conversion.",
+    )
     return parser.parse_args()
 
 
@@ -47,7 +56,33 @@ def read_table(db_path: Path, table_name: str) -> pd.DataFrame:
             return pd.DataFrame()
 
 
-def load_data(db_path: Path, log_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def convert_experiment_times_to_utc(experiments: pd.DataFrame, timezone_name: str) -> pd.DataFrame:
+    if experiments.empty:
+        return experiments
+    if timezone_name.strip().lower() in {"", "none", "utc"}:
+        return experiments
+
+    converted = experiments.copy()
+    for column in ["start_time", "end_time"]:
+        if column not in converted.columns:
+            continue
+        try:
+            converted[column] = (
+                converted[column]
+                .dt.tz_localize(timezone_name, nonexistent="shift_forward", ambiguous="NaT")
+                .dt.tz_convert("UTC")
+                .dt.tz_localize(None)
+            )
+        except Exception as exc:
+            print(f"Warning: unable to convert {column} from {timezone_name} to UTC: {exc}")
+    return converted
+
+
+def load_data(
+    db_path: Path,
+    log_path: Path,
+    experiment_timezone: str = "Europe/Paris",
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     metrics = read_table(db_path, "metrics")
     alerts = read_table(db_path, "alerts")
     actions = read_table(db_path, "actions")
@@ -81,6 +116,8 @@ def load_data(db_path: Path, log_path: Path) -> Tuple[pd.DataFrame, pd.DataFrame
         for column in columns:
             if column in frame.columns:
                 frame[column] = pd.to_datetime(frame[column], errors="coerce")
+
+    experiments = convert_experiment_times_to_utc(experiments, experiment_timezone)
 
     for column in ["is_malicious", "expected_alert", "observed_alert"]:
         if column in experiments.columns:
@@ -409,7 +446,8 @@ def figure_ssh_events_timeline(ssh_events: pd.DataFrame, alerts: pd.DataFrame, o
         save_placeholder(output_path, "Timeline SSH", "Aucun evenement SSH collecte.")
         return
 
-    data = ssh_events.sort_values("timestamp").copy()
+    time_column = "collected_at" if "collected_at" in ssh_events.columns else "timestamp"
+    data = ssh_events.sort_values(time_column).copy()
     event_colors = {
         "failed_password": "#b91c1c",
         "invalid_user": "#d97706",
@@ -419,7 +457,7 @@ def figure_ssh_events_timeline(ssh_events: pd.DataFrame, alerts: pd.DataFrame, o
 
     fig, ax = plt.subplots(figsize=(14, 5))
     colors = [event_colors.get(str(event_type), "#6b7280") for event_type in data["event_type"]]
-    ax.scatter(data["timestamp"], data["y"], c=colors, s=60, edgecolor="#111827", linewidth=0.4)
+    ax.scatter(data[time_column], data["y"], c=colors, s=60, edgecolor="#111827", linewidth=0.4)
 
     ssh_alerts = alerts[alerts["event_type"].astype(str).str.contains("ssh", na=False)] if not alerts.empty else pd.DataFrame()
     for _, alert in ssh_alerts.iterrows():
@@ -522,7 +560,8 @@ def write_summary(
             "- Les charges CPU legitimes evaluent les faux positifs d'une detection par seuils.",
             "- Les evenements SSH permettent de reduire les faux negatifs observes avec Hydra.",
             "- Les actions d'isolement/restauration documentent la valeur de la reponse active human-in-the-loop.",
-            "- La prochaine evolution logique est la correlation avec les logs SSH/syslog.",
+            "- La nouvelle campagne Syslog permet de montrer la correction du faux negatif Hydra observe sur la premiere version.",
+            "- La prochaine evolution logique est l'export de features pour tester ensuite une detection statistique ou Isolation Forest.",
             "",
         ]
     )
@@ -537,7 +576,7 @@ def main() -> None:
     output_dir = Path(args.out)
     ensure_output_dir(output_dir)
 
-    metrics, alerts, actions, ssh_events, experiments = load_data(db_path, log_path)
+    metrics, alerts, actions, ssh_events, experiments = load_data(db_path, log_path, args.experiment_timezone)
     vmid = choose_vmid(metrics, experiments, args.vmid)
 
     figure_cpu_timeline(metrics, alerts, experiments, vmid, output_dir)

@@ -194,6 +194,8 @@ pkill yes
 
 Le fichier `experiment_log.csv` sert a documenter manuellement les fenetres de test. Il permet de relier les metriques SQLite a la verite terrain : baseline, charge legitime, scan Nmap, brute-force SSH, scenario mixte.
 
+Les heures du fichier sont notees en heure locale Europe/Paris. Le script les convertit automatiquement vers l'UTC utilise par les conteneurs Docker pour aligner correctement les graphiques.
+
 Generer les figures :
 
 ```powershell
@@ -212,6 +214,8 @@ Forcer une VM cible precise :
 ```powershell
 python analysis/generate_figures.py --db data/soc_dashboard.sqlite3 --log experiment_log.csv --out analysis_output --vmid 103
 ```
+
+Si tu notes un futur journal directement en UTC, ajoute `--experiment-timezone UTC`.
 
 Sorties :
 

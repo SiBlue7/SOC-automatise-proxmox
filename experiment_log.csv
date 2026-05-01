@@ -15,3 +15,10 @@ start_time,end_time,scenario,label,vmid,target_ip,is_malicious,expected_alert,ob
 2026-04-29T09:41:00,2026-04-29T09:45:00,hydra,ssh_bruteforce_small,103,192.168.1.139,true,true,false,Hydra demo-user avec 10 mots de passe faux aucune alerte CPU RAM
 2026-04-29T10:25:00,2026-04-29T10:32:00,mixed,scan_hydra_light,103,192.168.1.139,true,true,false,nmap service scan puis hydra leger aucune alerte
 2026-04-29T10:37:00,2026-04-29T10:45:00,mixed,scan_hydra_cpu_forced,103,192.168.1.139,true,true,true,nmap large hydra passwords_30 et charge CPU yes pour declencher une alerte et tester la reponse active
+2026-05-01T15:15:00,2026-05-01T15:25:00,baseline,syslog_short_baseline,103,192.168.1.139,false,false,false,Version Syslog baseline courte pas alertes pas logs SSH
+2026-05-01T15:25:00,2026-05-01T15:30:00,syslog_test,manual_logger_failed_password,103,192.168.1.139,false,false,false,Test logger a 15h29 evenement visible failed_password validation pipeline Syslog
+2026-05-01T15:30:00,2026-05-01T15:40:00,ssh_failures,manual_wrong_passwords,103,192.168.1.139,true,true,true,6 echecs de connexion manuels 6 evenements failed_password alerte ssh_bruteforce_suspected lancee puis resolved
+2026-05-01T15:40:00,2026-05-01T15:47:00,pause,post_manual_pause,103,192.168.1.139,false,false,false,Pause apres echecs manuels verification resolution alerte
+2026-05-01T15:47:00,2026-05-01T15:57:00,hydra,syslog_hydra_short,103,192.168.1.139,true,true,true,Hydra court alerte ssh_bruteforce_suspected lancee puis resolved
+2026-05-01T15:57:00,2026-05-01T16:05:00,mixed,hydra_cpu_syslog_correlation,103,192.168.1.139,true,true,true,Hydra plus CPU alertes ssh_bruteforce_suspected vm_cpu_pressure ssh_cpu_correlated lancees puis resolved
+2026-05-01T16:05:00,2026-05-01T16:10:00,response,hydra_isolation_restore,103,192.168.1.139,true,true,true,Hydra court puis isolement a apparition alerte VM correctement isolee et restauree alerte ssh_bruteforce_suspected resolved
