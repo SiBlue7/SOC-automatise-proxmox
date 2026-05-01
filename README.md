@@ -144,6 +144,10 @@ Le service `proxmox-collector` continue de collecter meme si aucune page Streaml
 
 ## Fonctionnalites
 
+- Interface SOC avec navigation lateralisee et theme clair/sombre.
+- Vue `Vue SOC` :
+  - synthese des collecteurs, incidents ouverts, alertes actives et actions recentes ;
+  - cartes KPI lisibles pour la demonstration et l'usage quotidien.
 - Vue globale du noeud Proxmox : CPU, RAM, SWAP.
 - Inventaire des VM QEMU.
 - Graphiques quasi temps reel pour l'hote et les VM.

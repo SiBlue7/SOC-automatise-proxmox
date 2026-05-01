@@ -1,4 +1,5 @@
 from datetime import datetime
+from html import escape
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -96,6 +97,373 @@ INCIDENT_STATUS_LABELS = {
 
 INCIDENT_STATUS_VALUES = {label: value for value, label in INCIDENT_STATUS_LABELS.items()}
 
+SEVERITY_LABELS = {
+    "critical": "Critique",
+    "medium": "Moyen",
+    "low": "Faible",
+}
+
+STATUS_TONE = {
+    "open": "danger",
+    "acknowledged": "warning",
+    "contained": "info",
+    "resolved": "success",
+    "active": "danger",
+    "success": "success",
+    "warning": "warning",
+    "error": "danger",
+}
+TONE_LABELS = {
+    "danger": "Prioritaire",
+    "warning": "Attention",
+    "success": "OK",
+    "info": "Info",
+}
+
+
+def css_for_theme(theme: str) -> str:
+    if theme == "Clair":
+        tokens = {
+            "bg": "#f6f8fb",
+            "surface": "#ffffff",
+            "surface_alt": "#eef2f7",
+            "text": "#111827",
+            "muted": "#667085",
+            "border": "#d7dde7",
+            "primary": "#2563eb",
+            "primary_soft": "#dbeafe",
+            "danger": "#b91c1c",
+            "danger_soft": "#fee2e2",
+            "warning": "#b45309",
+            "warning_soft": "#fef3c7",
+            "success": "#047857",
+            "success_soft": "#d1fae5",
+            "info": "#0369a1",
+            "info_soft": "#e0f2fe",
+        }
+    else:
+        tokens = {
+            "bg": "#0f141b",
+            "surface": "#171d26",
+            "surface_alt": "#202836",
+            "text": "#f3f6fb",
+            "muted": "#a8b3c7",
+            "border": "#2e3848",
+            "primary": "#60a5fa",
+            "primary_soft": "#172d49",
+            "danger": "#f87171",
+            "danger_soft": "#3a1b22",
+            "warning": "#fbbf24",
+            "warning_soft": "#3b2f16",
+            "success": "#34d399",
+            "success_soft": "#17382d",
+            "info": "#38bdf8",
+            "info_soft": "#153244",
+        }
+
+    return f"""
+    <style>
+    :root {{
+        --soc-bg: {tokens['bg']};
+        --soc-surface: {tokens['surface']};
+        --soc-surface-alt: {tokens['surface_alt']};
+        --soc-text: {tokens['text']};
+        --soc-muted: {tokens['muted']};
+        --soc-border: {tokens['border']};
+        --soc-primary: {tokens['primary']};
+        --soc-primary-soft: {tokens['primary_soft']};
+        --soc-danger: {tokens['danger']};
+        --soc-danger-soft: {tokens['danger_soft']};
+        --soc-warning: {tokens['warning']};
+        --soc-warning-soft: {tokens['warning_soft']};
+        --soc-success: {tokens['success']};
+        --soc-success-soft: {tokens['success_soft']};
+        --soc-info: {tokens['info']};
+        --soc-info-soft: {tokens['info_soft']};
+    }}
+    .stApp {{
+        background: var(--soc-bg);
+        color: var(--soc-text);
+    }}
+    [data-testid="stSidebar"] {{
+        background: var(--soc-surface);
+        border-right: 1px solid var(--soc-border);
+    }}
+    [data-testid="stHeader"] {{
+        background: rgba(0,0,0,0);
+    }}
+    h1, h2, h3, h4, p, label, span {{
+        color: var(--soc-text);
+    }}
+    div[data-testid="stMetric"] {{
+        background: var(--soc-surface);
+        border: 1px solid var(--soc-border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+    }}
+    div[data-testid="stDataFrame"] {{
+        border: 1px solid var(--soc-border);
+        border-radius: 8px;
+        overflow: hidden;
+    }}
+    div.stButton > button {{
+        border-radius: 8px;
+        border: 1px solid var(--soc-border);
+        background: var(--soc-surface-alt);
+        color: var(--soc-text);
+        font-weight: 650;
+    }}
+    div.stButton > button[kind="primary"] {{
+        background: var(--soc-danger);
+        border: 1px solid var(--soc-danger);
+        color: white;
+    }}
+    div.stButton > button[kind="primary"]:hover {{
+        background: var(--soc-danger);
+        color: white;
+        filter: brightness(0.92);
+    }}
+    .soc-hero {{
+        background: linear-gradient(135deg, var(--soc-surface), var(--soc-surface-alt));
+        border: 1px solid var(--soc-border);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin: 4px 0 18px 0;
+    }}
+    .soc-eyebrow {{
+        color: var(--soc-primary);
+        font-size: 12px;
+        text-transform: uppercase;
+        font-weight: 800;
+        letter-spacing: 0;
+        margin-bottom: 6px;
+    }}
+    .soc-title {{
+        color: var(--soc-text);
+        font-size: 28px;
+        font-weight: 850;
+        line-height: 1.2;
+        margin: 0;
+    }}
+    .soc-subtitle {{
+        color: var(--soc-muted);
+        margin-top: 8px;
+        font-size: 14px;
+        line-height: 1.5;
+    }}
+    .soc-card {{
+        background: var(--soc-surface);
+        border: 1px solid var(--soc-border);
+        border-radius: 8px;
+        padding: 16px;
+        min-height: 116px;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+    }}
+    .soc-card-title {{
+        color: var(--soc-muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        font-weight: 800;
+        letter-spacing: 0;
+        margin-bottom: 10px;
+    }}
+    .soc-card-value {{
+        color: var(--soc-text);
+        font-size: 26px;
+        font-weight: 850;
+        line-height: 1.1;
+    }}
+    .soc-card-caption {{
+        color: var(--soc-muted);
+        font-size: 13px;
+        margin-top: 8px;
+        line-height: 1.35;
+    }}
+    .soc-panel {{
+        background: var(--soc-surface);
+        border: 1px solid var(--soc-border);
+        border-radius: 8px;
+        padding: 16px;
+        margin: 10px 0 16px 0;
+    }}
+    .soc-section-title {{
+        color: var(--soc-text);
+        font-size: 18px;
+        font-weight: 800;
+        margin: 0 0 4px 0;
+    }}
+    .soc-section-subtitle {{
+        color: var(--soc-muted);
+        font-size: 13px;
+        margin: 0 0 12px 0;
+    }}
+    .soc-pill {{
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 800;
+        margin-right: 6px;
+        border: 1px solid transparent;
+    }}
+    .soc-pill.danger {{
+        color: var(--soc-danger);
+        background: var(--soc-danger-soft);
+        border-color: var(--soc-danger);
+    }}
+    .soc-pill.warning {{
+        color: var(--soc-warning);
+        background: var(--soc-warning-soft);
+        border-color: var(--soc-warning);
+    }}
+    .soc-pill.success {{
+        color: var(--soc-success);
+        background: var(--soc-success-soft);
+        border-color: var(--soc-success);
+    }}
+    .soc-pill.info {{
+        color: var(--soc-info);
+        background: var(--soc-info-soft);
+        border-color: var(--soc-info);
+    }}
+    .soc-pill.neutral {{
+        color: var(--soc-muted);
+        background: var(--soc-surface-alt);
+        border-color: var(--soc-border);
+    }}
+    .soc-incident-title {{
+        color: var(--soc-text);
+        font-size: 17px;
+        font-weight: 800;
+        margin-bottom: 8px;
+    }}
+    .soc-muted {{
+        color: var(--soc-muted);
+    }}
+    </style>
+    """
+
+
+def render_theme_css(theme: str) -> None:
+    st.markdown(css_for_theme(theme), unsafe_allow_html=True)
+
+
+def render_hero(title: str, subtitle: str, eyebrow: str = "Proxmox Sentinel") -> None:
+    st.markdown(
+        f"""
+        <div class="soc-hero">
+          <div class="soc-eyebrow">{escape(eyebrow)}</div>
+          <div class="soc-title">{escape(title)}</div>
+          <div class="soc-subtitle">{escape(subtitle)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_section(title: str, subtitle: str = "") -> None:
+    st.markdown(
+        f"""
+        <div class="soc-section-title">{escape(title)}</div>
+        <div class="soc-section-subtitle">{escape(subtitle)}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def tone_for_severity(severity: str) -> str:
+    return {"critical": "danger", "medium": "warning", "low": "info"}.get(severity, "neutral")
+
+
+def tone_for_status(status: str) -> str:
+    return STATUS_TONE.get(status, "neutral")
+
+
+def pill_html(label: str, tone: str = "neutral") -> str:
+    return f'<span class="soc-pill {tone}">{escape(label)}</span>'
+
+
+def render_kpi_card(title: str, value: object, caption: str = "", tone: str = "neutral") -> None:
+    tone_label = TONE_LABELS.get(tone, "")
+    st.markdown(
+        f"""
+        <div class="soc-card">
+          <div class="soc-card-title">{escape(title)}</div>
+          <div class="soc-card-value">{escape(str(value))}</div>
+          <div class="soc-card-caption">{pill_html(tone_label, tone) if tone_label else ""}{escape(caption)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def compact_incidents_frame(incidents: List[Dict[str, object]]) -> pd.DataFrame:
+    frame = format_incidents_dataframe(incidents)
+    if frame.empty:
+        return frame
+    wanted = [
+        "ID",
+        "Statut",
+        "Severite",
+        "Score",
+        "VMID",
+        "Titre",
+        "Source",
+        "Utilisateur",
+        "Derniere activite",
+        "Synthese",
+    ]
+    return frame[[column for column in wanted if column in frame.columns]]
+
+
+def compact_alerts_frame(alerts: List[Dict[str, object]]) -> pd.DataFrame:
+    frame = format_alerts_dataframe(alerts)
+    if frame.empty:
+        return frame
+    wanted = ["ID", "Severite", "Score", "VMID", "Type", "Valeur", "Statut", "Derniere vue", "Message"]
+    return frame[[column for column in wanted if column in frame.columns]]
+
+
+def compact_actions_frame(actions: List[Dict[str, object]]) -> pd.DataFrame:
+    frame = format_actions_dataframe(actions)
+    if frame.empty:
+        return frame
+    wanted = ["Horodatage", "VMID", "Action", "Resultat", "Message"]
+    return frame[[column for column in wanted if column in frame.columns]]
+
+
+def render_incident_cards(incidents: List[Dict[str, object]], limit: int = 3) -> None:
+    if not incidents:
+        st.success("Aucun incident ouvert a traiter.")
+        return
+
+    for incident in incidents[:limit]:
+        status = str(incident.get("status", "unknown"))
+        severity = str(incident.get("severity", "unknown"))
+        title = str(incident.get("title", "Incident"))
+        summary = str(incident.get("summary", ""))
+        meta = (
+            f"VM {incident.get('vmid', '-')} | "
+            f"score {incident.get('score', '-')} | "
+            f"source {incident.get('source_ip') or '-'}"
+        )
+        st.markdown(
+            f"""
+            <div class="soc-panel">
+              <div>
+                {pill_html(incident_status_label(status), tone_for_status(status))}
+                {pill_html(severity_badge(severity), tone_for_severity(severity))}
+              </div>
+              <div class="soc-incident-title">{escape(title)}</div>
+              <div class="soc-muted">{escape(meta)}</div>
+              <div class="soc-card-caption">{escape(summary)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
 
 def incident_status_label(status: str) -> str:
     return INCIDENT_STATUS_LABELS.get(status, status)
@@ -128,6 +496,7 @@ def incident_next_step(status: str) -> Dict[str, str]:
 
 
 def ensure_session_state() -> None:
+    st.session_state.setdefault("theme", "Sombre")
     st.session_state.setdefault("node_history", {})
     st.session_state.setdefault("vm_history", {})
     st.session_state.setdefault("action_feedback", None)
@@ -240,6 +609,59 @@ def render_alert_banner(current_alerts: List[AlertCandidate]) -> None:
             st.info(text)
 
 
+def collector_snapshot(settings: AppConfig) -> Dict[str, object]:
+    latest_run = fetch_latest_collector_run(settings.db_path)
+    if latest_run is None:
+        return {"label": "Collecteur", "value": "Aucun cycle", "caption": "En attente du backend", "tone": "warning"}
+    try:
+        last_seen = datetime.fromisoformat(str(latest_run["timestamp"]))
+        age_seconds = (datetime.now() - last_seen).total_seconds()
+    except ValueError:
+        return {"label": "Collecteur", "value": "Timestamp illisible", "caption": "Verifier collector_runs", "tone": "warning"}
+
+    status = str(latest_run["status"])
+    if status == "error":
+        return {"label": "Collecteur", "value": "Erreur", "caption": str(latest_run["message"]), "tone": "danger"}
+    if status == "warning":
+        return {"label": "Collecteur", "value": "Attention", "caption": str(latest_run["message"]), "tone": "warning"}
+    if age_seconds <= settings.collector_heartbeat_seconds:
+        return {
+            "label": "Collecteur",
+            "value": "Actif",
+            "caption": f"Dernier cycle il y a {format_duration(age_seconds)}",
+            "tone": "success",
+        }
+    return {
+        "label": "Collecteur",
+        "value": "En retard",
+        "caption": f"Dernier cycle il y a {format_duration(age_seconds)}",
+        "tone": "warning",
+    }
+
+
+def syslog_snapshot(settings: AppConfig) -> Dict[str, object]:
+    if not settings.syslog_enabled:
+        return {"label": "Syslog", "value": "Desactive", "caption": "SYSLOG_ENABLED=False", "tone": "neutral"}
+    latest_run = fetch_latest_syslog_run(settings.db_path)
+    latest_event = fetch_latest_ssh_event(settings.db_path)
+    if latest_run is None:
+        return {"label": "Syslog", "value": "En attente", "caption": "Aucun statut soc-syslog", "tone": "warning"}
+
+    status = str(latest_run["status"])
+    if status == "error":
+        return {"label": "Syslog", "value": "Erreur", "caption": str(latest_run["message"]), "tone": "danger"}
+    if status == "warning":
+        return {"label": "Syslog", "value": "Attention", "caption": str(latest_run["message"]), "tone": "warning"}
+    if latest_event and str(latest_event.get("ingest_method", "")).startswith("syslog"):
+        return {
+            "label": "Syslog",
+            "value": "Actif",
+            "caption": f"Dernier evenement: VM {latest_event['vmid']} | {latest_event['event_type']}",
+            "tone": "success",
+        }
+    return {"label": "Syslog", "value": "Ecoute", "caption": "Aucun evenement SSH recent", "tone": "info"}
+
+
 def render_soc_metrics(settings: AppConfig) -> None:
     metrics = fetch_soc_metrics(settings.db_path)
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -253,6 +675,91 @@ def render_soc_metrics(settings: AppConfig) -> None:
         f"MTTD moyen: {format_duration(metrics['avg_mttd'])} | "
         f"MTTR moyen observe: {format_duration(metrics['avg_mttr'])}"
     )
+
+
+def render_soc_overview(
+    settings: AppConfig,
+    selected_node: str,
+    node_status: Dict[str, object],
+    vm_statuses: Dict[int, Dict[str, object]],
+    current_alerts: List[AlertCandidate],
+) -> None:
+    render_section(
+        "Vue SOC",
+        "Priorite aux incidents ouverts, a la sante des collecteurs et aux actions recentes.",
+    )
+    metrics = fetch_soc_metrics(settings.db_path)
+    active_incidents = metrics["active_incidents"]
+    active_alerts = metrics["active_alerts"]
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    with kpi1:
+        render_kpi_card(
+            "Incidents ouverts",
+            active_incidents,
+            "A traiter par l'analyste",
+            "danger" if active_incidents else "success",
+        )
+    with kpi2:
+        render_kpi_card(
+            "Alertes actives",
+            active_alerts,
+            f"{metrics['total_alerts']} alertes journalisees",
+            "warning" if active_alerts else "success",
+        )
+    with kpi3:
+        render_kpi_card("Evenements SSH", metrics["total_ssh_events"], "Logs normalises en SQLite", "info")
+    with kpi4:
+        render_kpi_card("Actions", metrics["total_actions"], "Isolements/restaurations audites", "neutral")
+
+    service_col1, service_col2, service_col3 = st.columns(3)
+    collector_state = collector_snapshot(settings)
+    syslog_state = syslog_snapshot(settings)
+    cpu_percent = float(node_status.get("cpu", 0.0)) * 100
+    with service_col1:
+        render_kpi_card(
+            str(collector_state["label"]),
+            collector_state["value"],
+            str(collector_state["caption"]),
+            str(collector_state["tone"]),
+        )
+    with service_col2:
+        render_kpi_card(
+            str(syslog_state["label"]),
+            syslog_state["value"],
+            str(syslog_state["caption"]),
+            str(syslog_state["tone"]),
+        )
+    with service_col3:
+        render_kpi_card(
+            f"Noeud {selected_node}",
+            f"{cpu_percent:.1f}% CPU",
+            f"{len(vm_statuses)} VM QEMU observees",
+            "warning" if cpu_percent >= settings.host_cpu_warn else "success",
+        )
+
+    st.divider()
+    left, right = st.columns([1.2, 1])
+    with left:
+        render_section("Incidents prioritaires", "Incidents non clos, tries par severite et date.")
+        incidents = [
+            incident
+            for incident in fetch_incidents(settings.db_path, limit=10, node=selected_node)
+            if incident["status"] != "resolved"
+        ]
+        render_incident_cards(incidents, limit=4)
+
+    with right:
+        render_section("Alertes live", "Alertes observees sur le rendu courant.")
+        render_alert_banner(current_alerts)
+        recent_actions = fetch_actions(settings.db_path, limit=5)
+        st.markdown("<br>", unsafe_allow_html=True)
+        render_section("Actions recentes", "Dernieres operations de reponse active.")
+        actions_frame = compact_actions_frame(recent_actions)
+        if actions_frame.empty:
+            st.info("Aucune action recente.")
+        else:
+            st.dataframe(actions_frame, use_container_width=True, hide_index=True)
 
 
 def render_collector_status(settings: AppConfig) -> None:
@@ -455,14 +962,19 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
         severity=severity_filter,
         status=incident_status_filter,
     )
-    incidents_frame = format_incidents_dataframe(incidents)
+    incidents_frame = compact_incidents_frame(incidents)
     st.subheader("Incidents correles")
     if incidents_frame.empty:
         st.info("Aucun incident correle ne correspond aux filtres.")
     else:
         st.dataframe(incidents_frame, use_container_width=True, hide_index=True)
-        incident_ids = [int(incident["id"]) for incident in incidents]
-        selected_incident_id = st.selectbox("Incident a analyser", options=incident_ids)
+        incident_options = {
+            f"#{incident['id']} | {incident_status_label(str(incident['status']))} | "
+            f"{severity_badge(str(incident['severity']))} | {incident['title']}": int(incident["id"])
+            for incident in incidents
+        }
+        selected_incident_label = st.selectbox("Incident a analyser", options=list(incident_options.keys()))
+        selected_incident_id = incident_options[selected_incident_label]
         selected_incident = next(incident for incident in incidents if int(incident["id"]) == selected_incident_id)
 
         detail_col1, detail_col2, detail_col3, detail_col4 = st.columns(4)
@@ -494,66 +1006,63 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
                 ):
                     update_incident_status(settings.db_path, selected_incident_id, "open")
                     st.rerun()
-
         timeline = fetch_incident_timeline(settings.db_path, selected_incident_id)
         timeline_frame = pd.DataFrame(timeline).rename(
             columns={"timestamp": "Horodatage", "event": "Evenement", "detail": "Detail"}
         )
         st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
 
-    st.divider()
-    st.subheader("Alertes brutes")
-
-    alerts = fetch_alerts(
-        settings.db_path,
-        node=node_filter,
-        vmid=vm_choices[vm_filter_label],
-        severity=severity_filter,
-        status=status_filter,
-    )
-    alerts_frame = format_alerts_dataframe(alerts)
-    if alerts_frame.empty:
-        st.info("Aucune alerte ne correspond aux filtres.")
-        return
-
-    st.dataframe(alerts_frame, use_container_width=True, hide_index=True)
-
-    alert_ids = [int(alert["id"]) for alert in alerts]
-    selected_alert_id = st.selectbox("Timeline incident", options=alert_ids)
-    selected_alert = next(alert for alert in alerts if int(alert["id"]) == selected_alert_id)
-    actions = fetch_actions(settings.db_path, limit=200)
-
-    timeline_rows = [
-        {
-            "Horodatage": selected_alert["first_seen"],
-            "Evenement": "Detection",
-            "Detail": selected_alert["message"],
-        }
-    ]
-    if selected_alert.get("resolved_at"):
-        timeline_rows.append(
-            {
-                "Horodatage": selected_alert["resolved_at"],
-                "Evenement": "Resolution metrique",
-                "Detail": "La condition d'alerte n'est plus observee.",
-            }
+    with st.expander("Alertes brutes liees au moteur", expanded=False):
+        alerts = fetch_alerts(
+            settings.db_path,
+            node=node_filter,
+            vmid=vm_choices[vm_filter_label],
+            severity=severity_filter,
+            status=status_filter,
         )
+        alerts_frame = compact_alerts_frame(alerts)
+        if alerts_frame.empty:
+            st.info("Aucune alerte ne correspond aux filtres.")
+            return
 
-    for action in actions:
-        same_node = action["node"] == selected_alert["node"]
-        same_vmid = action["vmid"] == selected_alert["vmid"]
-        after_detection = action["timestamp"] >= selected_alert["first_seen"]
-        if same_node and same_vmid and after_detection:
+        st.dataframe(alerts_frame, use_container_width=True, hide_index=True)
+
+        alert_ids = [int(alert["id"]) for alert in alerts]
+        selected_alert_id = st.selectbox("Timeline alerte brute", options=alert_ids)
+        selected_alert = next(alert for alert in alerts if int(alert["id"]) == selected_alert_id)
+        actions = fetch_actions(settings.db_path, limit=200)
+
+        timeline_rows = [
+            {
+                "Horodatage": selected_alert["first_seen"],
+                "Evenement": "Detection",
+                "Detail": selected_alert["message"],
+            }
+        ]
+        if selected_alert.get("resolved_at"):
             timeline_rows.append(
                 {
-                    "Horodatage": action["timestamp"],
-                    "Evenement": action["action"],
-                    "Detail": action["message"],
+                    "Horodatage": selected_alert["resolved_at"],
+                    "Evenement": "Resolution metrique",
+                    "Detail": "La condition d'alerte n'est plus observee.",
                 }
             )
 
-    timeline_frame = pd.DataFrame(timeline_rows).sort_values("Horodatage")
-    st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
+        for action in actions:
+            same_node = action["node"] == selected_alert["node"]
+            same_vmid = action["vmid"] == selected_alert["vmid"]
+            after_detection = action["timestamp"] >= selected_alert["first_seen"]
+            if same_node and same_vmid and after_detection:
+                timeline_rows.append(
+                    {
+                        "Horodatage": action["timestamp"],
+                        "Evenement": action["action"],
+                        "Detail": action["message"],
+                    }
+                )
+
+        timeline_frame = pd.DataFrame(timeline_rows).sort_values("Horodatage")
+        st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
 
 
 def render_host_tab(
@@ -565,8 +1074,7 @@ def render_host_tab(
 ) -> None:
     node_history = history_frame("node_history", selected_node)
 
-    st.subheader("Vue globale du serveur Proxmox")
-    st.caption(f"Noeud surveille: {selected_node}")
+    render_section("Supervision Proxmox", f"Noeud surveille: {selected_node}")
 
     memory = node_status.get("memory", {})
     swap = node_status.get("swap", {})
@@ -577,17 +1085,27 @@ def render_host_tab(
     swap_total = int(swap.get("total", 0))
 
     metric_cpu, metric_ram, metric_swap = st.columns(3)
-    metric_cpu.metric("CPU host", f"{cpu_percent:.2f}%")
-    metric_ram.metric(
-        "RAM host",
-        format_used_total_gib(memory_used, memory_total),
-        f"{percent_ratio(memory_used, memory_total):.1f}%",
-    )
-    metric_swap.metric(
-        "SWAP host",
-        format_used_total_gib(swap_used, swap_total),
-        f"{percent_ratio(swap_used, swap_total):.1f}%",
-    )
+    with metric_cpu:
+        render_kpi_card(
+            "CPU host",
+            f"{cpu_percent:.2f}%",
+            "Noeud Proxmox",
+            "warning" if cpu_percent >= settings.host_cpu_warn else "success",
+        )
+    with metric_ram:
+        render_kpi_card(
+            "RAM host",
+            format_used_total_gib(memory_used, memory_total),
+            f"{percent_ratio(memory_used, memory_total):.1f}%",
+            "neutral",
+        )
+    with metric_swap:
+        render_kpi_card(
+            "SWAP host",
+            format_used_total_gib(swap_used, swap_total),
+            f"{percent_ratio(swap_used, swap_total):.1f}%",
+            "neutral",
+        )
 
     chart_cpu, chart_ram, chart_swap = st.columns(3)
     with chart_cpu:
@@ -600,13 +1118,13 @@ def render_host_tab(
     render_alert_banner(current_alerts)
 
     st.divider()
-    st.subheader("Inventaire QEMU")
+    render_section("Inventaire QEMU", "Etat courant des VM observees via l'API Proxmox.")
     if vm_statuses:
         st.dataframe(format_vm_table(vm_statuses), use_container_width=True, hide_index=True)
     else:
         st.info("Aucune VM QEMU detectee sur ce noeud.")
 
-    st.subheader("Statistiques par VM QEMU")
+    render_section("Statistiques par VM QEMU", "Historique quasi temps reel conserve en session Streamlit.")
     if not vm_statuses:
         st.warning("Aucune VM disponible pour afficher une telemetrie detaillee.")
         return
@@ -645,8 +1163,10 @@ def render_host_tab(
 
 
 def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_statuses: Dict[int, Dict[str, object]]) -> None:
-    st.subheader("Reponse active human-in-the-loop")
-    st.caption("Perimetre volontaire du POC: VM QEMU uniquement, interface net0 uniquement.")
+    render_section(
+        "Reponse active",
+        "Confinement manuel et journalise. Perimetre du POC: VM QEMU uniquement, interface net0 uniquement.",
+    )
 
     if not vm_statuses:
         st.warning("Aucune VM disponible pour lancer une action d'isolement.")
@@ -678,13 +1198,31 @@ def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_sta
         network_state = None
         st.error(f"Impossible de lire l'etat de net0: {exc}")
 
+    state_col1, state_col2, state_col3 = st.columns(3)
     if network_state:
         if network_state.isolated is True:
-            st.warning(network_state.message)
+            state_value = "Isole"
+            state_tone = "danger"
         elif network_state.isolated is False:
-            st.info(network_state.message)
+            state_value = "Connecte"
+            state_tone = "success"
         else:
-            st.error(network_state.message)
+            state_value = "Inconnu"
+            state_tone = "warning"
+        with state_col1:
+            render_kpi_card("Etat net0", state_value, network_state.message, state_tone)
+    else:
+        with state_col1:
+            render_kpi_card("Etat net0", "Erreur", "Lecture impossible", "danger")
+    with state_col2:
+        render_kpi_card("VM cible", selected_vmid, selected_label, "neutral")
+    with state_col3:
+        render_kpi_card(
+            "Protection",
+            "Protegee" if protected else "Action possible",
+            "PROTECTED_VMIDS" if protected else "Confirmation requise",
+            "warning" if protected else "info",
+        )
 
     if protected:
         st.warning("Cette VM est protegee par PROTECTED_VMIDS: l'isolement est bloque.")
@@ -696,6 +1234,7 @@ def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_sta
         disabled=protected,
     )
 
+    st.markdown("<br>", unsafe_allow_html=True)
     isolate_col, restore_col = st.columns(2)
     action_result = None
 
@@ -755,7 +1294,7 @@ def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_sta
 
 
 def render_audit_tab(settings: AppConfig) -> None:
-    st.subheader("Journal d'audit des actions")
+    render_section("Journal d'audit", "Historique des actions de reponse active et des blocages de protection.")
     actions_frame = format_actions_dataframe(fetch_actions(settings.db_path, limit=200))
     if actions_frame.empty:
         st.info("Aucune action de reponse active n'a encore ete journalisee.")
@@ -764,7 +1303,7 @@ def render_audit_tab(settings: AppConfig) -> None:
 
 
 def render_ssh_events_tab(settings: AppConfig, node_names: List[str], vm_statuses: Dict[int, Dict[str, object]]) -> None:
-    st.subheader("Evenements SSH / Syslog collectes")
+    render_section("Logs SSH / Syslog", "Evenements normalises recus depuis rsyslog ou le fallback SSH.")
     if not settings.ssh_log_targets and not settings.syslog_vm_map:
         st.info("Aucune source de logs configuree. Renseigne SYSLOG_VM_MAP ou SSH_LOG_TARGETS.")
 
@@ -820,29 +1359,21 @@ def get_connection(settings: AppConfig):
 
 st.set_page_config(page_title="Proxmox Sentinel - SOC Interface", layout="wide")
 
-st.markdown(
-    """
-    <style>
-    div.stButton > button[kind="primary"] {
-        background-color: #b91c1c;
-        border: 1px solid #991b1b;
-        color: white;
-    }
-    div.stButton > button[kind="primary"]:hover {
-        background-color: #991b1b;
-        color: white;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 ensure_session_state()
 
-st.title("Proxmox Sentinel - SOC Interface")
-st.caption(
-    "Supervision Proxmox, detection comportementale explicable, persistence SQLite "
-    "et reponse active controlee par analyste."
+with st.sidebar:
+    st.session_state["theme"] = st.radio(
+        "Theme",
+        options=["Sombre", "Clair"],
+        index=0 if st.session_state["theme"] == "Sombre" else 1,
+        horizontal=True,
+    )
+
+render_theme_css(st.session_state["theme"])
+
+render_hero(
+    "SOC Dashboard",
+    "Supervision Proxmox, detection comportementale explicable, incidents correles et reponse active human-in-the-loop.",
 )
 
 try:
@@ -914,8 +1445,17 @@ refresh_options = {
     "10 secondes": "10s",
     "30 secondes": "30s",
 }
+navigation_options = [
+    "Vue SOC",
+    "Incidents",
+    "Supervision Proxmox",
+    "Reponse active",
+    "Logs SSH / Syslog",
+    "Audit",
+]
 
 with st.sidebar:
+    navigation = st.selectbox("Navigation", options=navigation_options)
     selected_node = st.selectbox("Noeud", options=node_names, index=default_node_index)
     refresh_label = st.selectbox("Rafraichissement", options=list(refresh_options.keys()), index=1)
     st.divider()
@@ -961,23 +1501,17 @@ def render_dashboard() -> None:
             upsert_alert(settings.db_path, alert)
         resolve_alerts_for_node(settings.db_path, selected_node, evaluation.active_keys, sample_time)
 
-    tab_supervision, tab_incidents, tab_response, tab_ssh, tab_audit = st.tabs(
-        ["Supervision", "Incidents / Alertes", "Reponse active", "Logs SSH / Syslog", "Audit"]
-    )
-
-    with tab_supervision:
-        render_host_tab(settings, selected_node, node_status, vm_statuses, evaluation.current_alerts)
-
-    with tab_incidents:
+    if navigation == "Vue SOC":
+        render_soc_overview(settings, selected_node, node_status, vm_statuses, evaluation.current_alerts)
+    elif navigation == "Incidents":
         render_incidents_tab(settings, node_names, vm_statuses)
-
-    with tab_response:
+    elif navigation == "Supervision Proxmox":
+        render_host_tab(settings, selected_node, node_status, vm_statuses, evaluation.current_alerts)
+    elif navigation == "Reponse active":
         render_response_tab(settings, proxmox, selected_node, vm_statuses)
-
-    with tab_ssh:
+    elif navigation == "Logs SSH / Syslog":
         render_ssh_events_tab(settings, node_names, vm_statuses)
-
-    with tab_audit:
+    elif navigation == "Audit":
         render_audit_tab(settings)
 
 
