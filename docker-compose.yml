@@ -31,3 +31,20 @@ services:
       - ./data:/data
       - ./ssh_keys:/ssh_keys:ro
     restart: always
+
+  soc-syslog:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: soc-syslog
+    command: ["python", "syslog_collector.py"]
+    env_file:
+      - .env
+    environment:
+      SOC_DB_PATH: ${SOC_DB_PATH:-/data/soc_dashboard.sqlite3}
+    ports:
+      - "5514:5514/tcp"
+      - "5514:5514/udp"
+    volumes:
+      - ./data:/data
+    restart: always

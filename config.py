@@ -14,6 +14,14 @@ class SshLogTarget:
 
 
 @dataclass(frozen=True)
+class SyslogVmMapping:
+    vmid: int
+    host: str
+    name: str
+    node: str
+
+
+@dataclass(frozen=True)
 class AppConfig:
     host: str
     user: str
@@ -42,6 +50,12 @@ class AppConfig:
     ssh_auth_failure_critical: int
     ssh_correlation_cpu_threshold: float
     ssh_correlation_window_seconds: int
+    syslog_enabled: bool
+    syslog_bind_host: str
+    syslog_port: int
+    syslog_protocols: Set[str]
+    syslog_default_node: str
+    syslog_vm_map: List[SyslogVmMapping]
 
 
 def parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -124,6 +138,52 @@ def parse_ssh_log_targets(value: Optional[str]) -> List[SshLogTarget]:
     return targets
 
 
+def parse_syslog_protocols(value: Optional[str]) -> Set[str]:
+    if value is None or not value.strip():
+        return {"tcp", "udp"}
+
+    protocols = {part.strip().lower() for part in value.split(",") if part.strip()}
+    invalid = protocols - {"tcp", "udp"}
+    if invalid:
+        raise ValueError("SYSLOG_PROTOCOLS accepte uniquement tcp, udp ou tcp,udp.")
+    if not protocols:
+        raise ValueError("SYSLOG_PROTOCOLS ne peut pas etre vide si SYSLOG_ENABLED=True.")
+    return protocols
+
+
+def parse_syslog_vm_map(value: Optional[str], default_node: str) -> List[SyslogVmMapping]:
+    if value is None or not value.strip():
+        return []
+
+    mappings: List[SyslogVmMapping] = []
+    for raw_mapping in value.split(";"):
+        mapping = raw_mapping.strip()
+        if not mapping:
+            continue
+        parts = [part.strip() for part in mapping.split(":")]
+        if len(parts) not in {2, 3, 4}:
+            raise ValueError(
+                "SYSLOG_VM_MAP doit utiliser le format "
+                "vmid:host[:name[:node]], separe par des points-virgules."
+            )
+        try:
+            vmid = int(parts[0])
+        except ValueError as exc:
+            raise ValueError("Le premier champ de chaque SYSLOG_VM_MAP doit etre un VMID.") from exc
+        host = parts[1]
+        if not host:
+            raise ValueError("Le champ host de SYSLOG_VM_MAP ne peut pas etre vide.")
+        mappings.append(
+            SyslogVmMapping(
+                vmid=vmid,
+                host=host,
+                name=parts[2] if len(parts) >= 3 and parts[2] else f"VM {vmid}",
+                node=parts[3] if len(parts) == 4 and parts[3] else default_node,
+            )
+        )
+    return mappings
+
+
 def sanitize_host(raw_host: str) -> str:
     host = raw_host.strip()
     host = host.removeprefix("https://").removeprefix("http://")
@@ -165,6 +225,7 @@ def read_settings() -> AppConfig:
     ssh_auth_failure_critical = parse_int_env("SSH_AUTH_FAILURE_CRITICAL", 20, minimum=1)
     if ssh_auth_failure_warn >= ssh_auth_failure_critical:
         raise ValueError("SSH_AUTH_FAILURE_WARN doit etre inferieur a SSH_AUTH_FAILURE_CRITICAL.")
+    syslog_default_node = os.getenv("SYSLOG_DEFAULT_NODE", "pve").strip() or "pve"
 
     return AppConfig(
         host=sanitize_host(required["PROXMOX_HOST"]),
@@ -194,4 +255,10 @@ def read_settings() -> AppConfig:
         ssh_auth_failure_critical=ssh_auth_failure_critical,
         ssh_correlation_cpu_threshold=parse_float_env("SSH_CORRELATION_CPU_THRESHOLD", 50.0),
         ssh_correlation_window_seconds=parse_int_env("SSH_CORRELATION_WINDOW_SECONDS", 300, minimum=30),
+        syslog_enabled=parse_bool(os.getenv("SYSLOG_ENABLED"), default=True),
+        syslog_bind_host=os.getenv("SYSLOG_BIND_HOST", "0.0.0.0").strip() or "0.0.0.0",
+        syslog_port=parse_int_env("SYSLOG_PORT", 5514, minimum=1),
+        syslog_protocols=parse_syslog_protocols(os.getenv("SYSLOG_PROTOCOLS")),
+        syslog_default_node=syslog_default_node,
+        syslog_vm_map=parse_syslog_vm_map(os.getenv("SYSLOG_VM_MAP"), syslog_default_node),
     )

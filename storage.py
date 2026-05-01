@@ -23,6 +23,13 @@ def connect_db(db_path: str):
         connection.close()
 
 
+def ensure_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    if any(row["name"] == column for row in columns):
+        return
+    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 def init_db(db_path: str) -> None:
     with connect_db(db_path) as connection:
         connection.execute("PRAGMA journal_mode = WAL")
@@ -108,15 +115,32 @@ def init_db(db_path: str) -> None:
                 username TEXT,
                 event_type TEXT NOT NULL,
                 raw_line TEXT NOT NULL,
-                line_hash TEXT NOT NULL UNIQUE
+                line_hash TEXT NOT NULL UNIQUE,
+                ingest_method TEXT NOT NULL DEFAULT 'ssh',
+                hostname TEXT
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS syslog_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                status TEXT NOT NULL,
+                events_seen INTEGER NOT NULL DEFAULT 0,
+                events_inserted INTEGER NOT NULL DEFAULT 0,
+                message TEXT NOT NULL
+            )
+            """
+        )
+        ensure_column(connection, "ssh_events", "ingest_method", "TEXT NOT NULL DEFAULT 'ssh'")
+        ensure_column(connection, "ssh_events", "hostname", "TEXT")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_metrics_node_time ON metrics(node, timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_alerts_status_time ON alerts(status, first_seen)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_alerts_key_status ON alerts(alert_key, status)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_actions_time ON actions(timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_collector_runs_time ON collector_runs(timestamp)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_syslog_runs_time ON syslog_runs(timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_time ON ssh_events(timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_vmid_time ON ssh_events(vmid, timestamp)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_ssh_events_type_time ON ssh_events(event_type, timestamp)")
@@ -315,12 +339,50 @@ def record_collector_run(
         )
 
 
+def record_syslog_run(
+    db_path: str,
+    status: str,
+    message: str,
+    events_seen: int = 0,
+    events_inserted: int = 0,
+    timestamp: Optional[datetime] = None,
+) -> None:
+    event_time = timestamp or datetime.now()
+    with connect_db(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO syslog_runs (timestamp, status, events_seen, events_inserted, message)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                iso_timestamp(event_time),
+                status,
+                events_seen,
+                events_inserted,
+                message,
+            ),
+        )
+
+
 def fetch_latest_collector_run(db_path: str) -> Optional[Dict[str, object]]:
     with connect_db(db_path) as connection:
         row = connection.execute(
             """
             SELECT id, timestamp, status, nodes_seen, vm_count, alerts_seen, message
             FROM collector_runs
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def fetch_latest_syslog_run(db_path: str) -> Optional[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id, timestamp, status, events_seen, events_inserted, message
+            FROM syslog_runs
             ORDER BY timestamp DESC
             LIMIT 1
             """
@@ -339,9 +401,9 @@ def insert_ssh_events(db_path: str, events: List[Dict[str, object]]) -> int:
                 """
                 INSERT OR IGNORE INTO ssh_events (
                     timestamp, collected_at, node, vmid, target_host, source_ip,
-                    username, event_type, raw_line, line_hash
+                    username, event_type, raw_line, line_hash, ingest_method, hostname
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event["timestamp"],
@@ -354,6 +416,8 @@ def insert_ssh_events(db_path: str, events: List[Dict[str, object]]) -> int:
                     event["event_type"],
                     event["raw_line"],
                     event["line_hash"],
+                    event.get("ingest_method", "ssh"),
+                    event.get("hostname"),
                 ),
             )
             inserted += cursor.rowcount
@@ -396,7 +460,7 @@ def fetch_recent_ssh_events(
         rows = connection.execute(
             f"""
             SELECT id, timestamp, collected_at, node, vmid, target_host,
-                   source_ip, username, event_type, raw_line
+                   source_ip, username, event_type, raw_line, ingest_method, hostname
             FROM ssh_events
             {where_sql}
             ORDER BY timestamp DESC
@@ -405,6 +469,20 @@ def fetch_recent_ssh_events(
             (*params, limit),
         ).fetchall()
     return rows_to_dicts(rows)
+
+
+def fetch_latest_ssh_event(db_path: str) -> Optional[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id, timestamp, collected_at, node, vmid, target_host,
+                   source_ip, username, event_type, raw_line, ingest_method, hostname
+            FROM ssh_events
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> List[Dict[str, object]]:

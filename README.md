@@ -18,7 +18,9 @@ L'approche reste volontairement progressive :
 
 - `app.py` : interface Streamlit, visualisation et reponse active.
 - `collector.py` : collecte continue independante du navigateur.
-- `ssh_log_collector.py` : collecte optionnelle des logs SSH des VM cibles.
+- `syslog_collector.py` : reception centralisee des logs SSH/auth envoyes par les VM.
+- `ssh_log_collector.py` : fallback optionnel par connexion SSH, desactive par defaut.
+- `auth_log_parser.py` : parsing commun des evenements SSH.
 - `config.py` : lecture et validation du `.env`.
 - `proxmox_client.py` : connexion API et collecte Proxmox.
 - `detection.py` : regles d'alertes, score et severite.
@@ -56,8 +58,14 @@ MAX_HISTORY_POINTS=30
 COLLECT_INTERVAL_SECONDS=5
 APP_PERSIST_ON_RENDER=False
 COLLECTOR_HEARTBEAT_SECONDS=30
-SSH_LOG_TARGETS=103:192.168.1.139:demo-user:/var/log/auth.log
-SSH_KEY_PATH=/ssh_keys/soc_dashboard_key
+SYSLOG_ENABLED=True
+SYSLOG_BIND_HOST=0.0.0.0
+SYSLOG_PORT=5514
+SYSLOG_PROTOCOLS=tcp,udp
+SYSLOG_DEFAULT_NODE=pve
+SYSLOG_VM_MAP=103:192.168.1.139:demo-target
+SSH_LOG_TARGETS=
+SSH_KEY_PATH=
 SSH_CONNECT_TIMEOUT_SECONDS=5
 SSH_LOG_LOOKBACK_MINUTES=10
 SSH_LOG_MAX_LINES=300
@@ -71,22 +79,40 @@ SSH_CORRELATION_WINDOW_SECONDS=300
 
 `COLLECT_INTERVAL_SECONDS` pilote la frequence de collecte du backend. `APP_PERSIST_ON_RENDER=False` evite que Streamlit double les ecritures du collecteur.
 
-`SSH_LOG_TARGETS` active la correlation SSH. Format : `vmid:ip:user[:log_path]`, avec plusieurs cibles separees par `;`.
+`SYSLOG_VM_MAP` active la correlation SSH durable. Format : `vmid:host[:name[:node]]`, avec plusieurs VM separees par `;`. Exemple multi-VM :
 
-Le collecteur utilise une cle SSH montee depuis `./ssh_keys`. Cree une cle dediee sur la VM dashboard puis ajoute sa cle publique dans `~demo-user/.ssh/authorized_keys` sur la VM cible :
-
-```bash
-mkdir -p ssh_keys
-ssh-keygen -t ed25519 -f ssh_keys/soc_dashboard_key -N ""
-ssh-copy-id -i ssh_keys/soc_dashboard_key.pub demo-user@192.168.1.139
-chmod 600 ssh_keys/soc_dashboard_key
+```env
+SYSLOG_VM_MAP=103:192.168.1.139:demo-target:pve;104:192.168.1.140:web-01:pve
 ```
 
-L'utilisateur cible doit pouvoir lire les logs SSH. Selon la distribution, ajoute-le au groupe `adm` :
+`host` peut etre l'adresse IP source ou le hostname envoye par rsyslog. Si le noeud n'est pas precise, `SYSLOG_DEFAULT_NODE` est utilise.
+
+### Configuration Syslog des VM Linux
+
+Sur chaque VM Linux surveillee, installer et configurer rsyslog pour pousser les logs auth vers le SOC :
 
 ```bash
-sudo usermod -aG adm demo-user
+sudo apt install rsyslog
+sudo nano /etc/rsyslog.d/90-soc-dashboard.conf
 ```
+
+Contenu recommande en TCP :
+
+```text
+auth,authpriv.* @@IP_DU_SOC:5514
+```
+
+Puis redemarrer rsyslog :
+
+```bash
+sudo systemctl restart rsyslog
+```
+
+En lab, ouvrir le port `5514/tcp` uniquement depuis le reseau des VM. UDP est aussi disponible avec `@IP_DU_SOC:5514`, mais TCP est recommande pour limiter les pertes.
+
+### Fallback SSH optionnel
+
+`SSH_LOG_TARGETS` reste disponible pour debug ou environnement sans rsyslog. Format : `vmid:ip:user[:log_path]`, avec plusieurs cibles separees par `;`. Ce mode necessite une cle SSH montee depuis `./ssh_keys` et un utilisateur pouvant lire `/var/log/auth.log`. Il est desactive par defaut car moins perenne.
 
 ## Lancement Docker
 
@@ -99,6 +125,7 @@ Verifier les services :
 ```powershell
 docker compose ps
 docker compose logs -f proxmox-collector
+docker compose logs -f soc-syslog
 ```
 
 Interface :
@@ -134,10 +161,10 @@ Le service `proxmox-collector` continue de collecter meme si aucune page Streaml
   - journal d'audit des actions ;
   - restauration reseau.
 - Correlation SSH :
-  - collecte des echecs SSH depuis la VM cible ;
+  - collecte des echecs SSH via Syslog centralise ;
   - alerte `ssh_bruteforce_suspected` si les echecs depassent le seuil ;
   - alerte `ssh_cpu_correlated` si les echecs SSH coincident avec une pression CPU ;
-  - onglet `Logs SSH` pour auditer les evenements collectes.
+  - onglet `Logs SSH / Syslog` pour auditer les evenements collectes.
 
 ## Protocole experimental
 
@@ -149,7 +176,7 @@ Scenario reproductible pour une demonstration de soutenance avec collecte contin
 4. Selectionner une VM QEMU cible non protegee.
 5. Generer une charge CPU controlee sur la VM cible.
 6. Observer l'apparition de l'alerte dans `Supervision` puis `Incidents / Alertes`.
-7. Lancer un brute-force SSH controle pour verifier la correlation logs.
+7. Lancer un brute-force SSH controle pour verifier la correlation Syslog.
 8. Noter le score, la severite et l'horodatage de detection.
 9. Confirmer l'isolement dans `Reponse active` si le scenario le demande.
 10. Verifier que `net0` passe en etat isole.
@@ -208,7 +235,8 @@ Sorties :
 
 - Detection par seuils explicables, pas encore par apprentissage automatique.
 - Polling API regulier, pas d'architecture event-driven.
-- Correlation SSH initiale disponible, mais limitee aux logs accessibles par SSH.
+- Correlation SSH disponible via Syslog, sans lecture distante repetitive des VM.
+- Pas encore de chiffrement TLS Syslog dans le POC ; a securiser par firewall/reseau prive en lab.
 - Pas de detection reseau profonde.
 - Pas de remediations autonomes completes : l'analyste valide l'isolement.
 - Lab uniquement avec `VERIFY_SSL=False`; a corriger pour une production.

@@ -18,6 +18,8 @@ from storage import (
     fetch_actions,
     fetch_alerts,
     fetch_latest_collector_run,
+    fetch_latest_ssh_event,
+    fetch_latest_syslog_run,
     fetch_recent_ssh_events,
     fetch_soc_metrics,
     init_db,
@@ -241,6 +243,51 @@ def render_collector_status(settings: AppConfig) -> None:
         st.error(f"Collecteur: inactif ou bloque. {details}")
 
 
+def render_syslog_status(settings: AppConfig) -> None:
+    if not settings.syslog_enabled:
+        st.caption("Syslog: desactive.")
+        return
+
+    latest_run = fetch_latest_syslog_run(settings.db_path)
+    latest_event = fetch_latest_ssh_event(settings.db_path)
+
+    if latest_run is None:
+        st.info("Syslog: en attente du service soc-syslog.")
+        return
+
+    try:
+        last_seen = datetime.fromisoformat(str(latest_run["timestamp"]))
+        age_seconds = (datetime.now() - last_seen).total_seconds()
+    except ValueError:
+        st.warning("Syslog: horodatage illisible.")
+        return
+
+    status = str(latest_run["status"])
+    details = (
+        f"Dernier statut: {format_duration(age_seconds)} | "
+        f"vus={latest_run['events_seen']} inseres={latest_run['events_inserted']}"
+    )
+    message = str(latest_run["message"])
+
+    if status == "error":
+        st.error(f"Syslog: erreur. {details}")
+        st.caption(message)
+    elif status == "warning":
+        st.warning(f"Syslog: attention. {details}")
+        st.caption(message)
+    elif status == "disabled":
+        st.caption("Syslog: desactive.")
+    elif latest_event and str(latest_event.get("ingest_method", "")).startswith("syslog"):
+        st.success(f"Syslog: actif. {details}")
+        st.caption(
+            f"Dernier log: VM {latest_event['vmid']} | "
+            f"{latest_event['event_type']} | {latest_event['timestamp']}"
+        )
+    else:
+        st.success(f"Syslog: en ecoute. {details}")
+        st.caption("Aucun evenement Syslog SSH recu pour le moment.")
+
+
 def format_alerts_dataframe(alerts: List[Dict[str, object]]) -> pd.DataFrame:
     frame = pd.DataFrame(alerts)
     if frame.empty:
@@ -301,6 +348,8 @@ def format_ssh_events_dataframe(events: List[Dict[str, object]]) -> pd.DataFrame
             "source_ip": "Source",
             "username": "Utilisateur",
             "event_type": "Evenement",
+            "ingest_method": "Collecteur",
+            "hostname": "Hostname",
             "raw_line": "Log brut",
         }
     )
@@ -580,17 +629,16 @@ def render_audit_tab(settings: AppConfig) -> None:
 
 
 def render_ssh_events_tab(settings: AppConfig, node_names: List[str], vm_statuses: Dict[int, Dict[str, object]]) -> None:
-    st.subheader("Evenements SSH collectes")
-    if not settings.ssh_log_targets:
-        st.info("Aucune cible SSH configuree. Renseigne SSH_LOG_TARGETS pour activer cette vue.")
-        return
+    st.subheader("Evenements SSH / Syslog collectes")
+    if not settings.ssh_log_targets and not settings.syslog_vm_map:
+        st.info("Aucune source de logs configuree. Renseigne SYSLOG_VM_MAP ou SSH_LOG_TARGETS.")
 
     filter_col1, filter_col2 = st.columns(2)
-    node_filter = filter_col1.selectbox("Noeud logs SSH", options=["Tous", *node_names])
+    node_filter = filter_col1.selectbox("Noeud logs", options=["Tous", *node_names])
     vm_choices = {"Toutes": None}
     for vmid in sorted(vm_statuses):
         vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
-    vm_filter_label = filter_col2.selectbox("VM logs SSH", options=list(vm_choices.keys()))
+    vm_filter_label = filter_col2.selectbox("VM logs", options=list(vm_choices.keys()))
 
     events = fetch_recent_ssh_events(
         settings.db_path,
@@ -600,7 +648,7 @@ def render_ssh_events_tab(settings: AppConfig, node_names: List[str], vm_statuse
     )
     events_frame = format_ssh_events_dataframe(events)
     if events_frame.empty:
-        st.info("Aucun evenement SSH collecte pour les filtres selectionnes.")
+        st.info("Aucun evenement SSH/Syslog collecte pour les filtres selectionnes.")
     else:
         st.dataframe(events_frame, use_container_width=True, hide_index=True)
 
@@ -682,9 +730,15 @@ with st.sidebar:
             protected_list = ", ".join(str(vmid) for vmid in sorted(settings.protected_vmids))
             st.info(f"VM protegees: {protected_list}")
         render_collector_status(settings)
+        render_syslog_status(settings)
+        if settings.syslog_enabled and settings.syslog_vm_map:
+            syslog_targets = ", ".join(
+                f"{mapping.vmid}@{mapping.host}/{mapping.node}" for mapping in settings.syslog_vm_map
+            )
+            st.caption(f"Syslog map: {syslog_targets}")
         if settings.ssh_log_targets:
             targets = ", ".join(f"{target.vmid}@{target.host}" for target in settings.ssh_log_targets)
-            st.caption(f"Logs SSH: {targets}")
+            st.caption(f"Fallback SSH: {targets}")
         if settings.app_persist_on_render:
             st.warning("APP_PERSIST_ON_RENDER=True: Streamlit ecrit aussi les metriques.")
         else:
@@ -773,7 +827,7 @@ def render_dashboard() -> None:
         resolve_alerts_for_node(settings.db_path, selected_node, evaluation.active_keys, sample_time)
 
     tab_supervision, tab_incidents, tab_response, tab_ssh, tab_audit = st.tabs(
-        ["Supervision", "Incidents / Alertes", "Reponse active", "Logs SSH", "Audit"]
+        ["Supervision", "Incidents / Alertes", "Reponse active", "Logs SSH / Syslog", "Audit"]
     )
 
     with tab_supervision:

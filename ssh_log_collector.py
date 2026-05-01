@@ -1,21 +1,11 @@
-import hashlib
-import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from auth_log_parser import build_ssh_event, parse_auth_log_line as parse_shared_auth_log_line
 from config import AppConfig, SshLogTarget
-
-
-FAILED_PASSWORD_RE = re.compile(
-    r"Failed password for (?:invalid user )?(?P<username>\S+) from (?P<source_ip>\S+)"
-)
-INVALID_USER_RE = re.compile(r"Invalid user (?P<username>\S+) from (?P<source_ip>\S+)")
-ACCEPTED_PASSWORD_RE = re.compile(r"Accepted \S+ for (?P<username>\S+) from (?P<source_ip>\S+)")
-ISO_TS_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2})")
-SYSLOG_TS_RE = re.compile(r"^(?P<ts>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})")
 
 
 @dataclass(frozen=True)
@@ -81,63 +71,19 @@ def parse_auth_log_line(
     node_name: str,
     collected_at: datetime,
 ) -> Optional[Dict[str, object]]:
-    event_type = None
-    username = None
-    source_ip = None
-
-    failed_match = FAILED_PASSWORD_RE.search(line)
-    invalid_match = INVALID_USER_RE.search(line)
-    accepted_match = ACCEPTED_PASSWORD_RE.search(line)
-
-    if failed_match:
-        event_type = "failed_password"
-        username = failed_match.group("username")
-        source_ip = failed_match.group("source_ip")
-    elif invalid_match:
-        event_type = "invalid_user"
-        username = invalid_match.group("username")
-        source_ip = invalid_match.group("source_ip")
-    elif accepted_match:
-        event_type = "accepted_password"
-        username = accepted_match.group("username")
-        source_ip = accepted_match.group("source_ip")
-    else:
+    parsed_event = parse_shared_auth_log_line(line, collected_at)
+    if parsed_event is None:
         return None
 
-    event_time = parse_log_timestamp(line, collected_at)
-    line_hash = hashlib.sha256(f"{target.vmid}|{target.host}|{line}".encode("utf-8")).hexdigest()
-    return {
-        "timestamp": event_time.isoformat(timespec="seconds"),
-        "collected_at": collected_at.isoformat(timespec="seconds"),
-        "node": node_name,
-        "vmid": target.vmid,
-        "target_host": target.host,
-        "source_ip": source_ip,
-        "username": username,
-        "event_type": event_type,
-        "raw_line": line,
-        "line_hash": line_hash,
-    }
-
-
-def parse_log_timestamp(line: str, fallback: datetime) -> datetime:
-    iso_match = ISO_TS_RE.match(line)
-    if iso_match:
-        value = iso_match.group("ts").replace("T", " ")
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            pass
-
-    syslog_match = SYSLOG_TS_RE.match(line)
-    if syslog_match:
-        value = f"{fallback.year} {syslog_match.group('ts')}"
-        try:
-            return datetime.strptime(value, "%Y %b %d %H:%M:%S")
-        except ValueError:
-            pass
-
-    return fallback
+    return build_ssh_event(
+        parsed_event=parsed_event,
+        collected_at=collected_at,
+        node=node_name,
+        vmid=target.vmid,
+        target_host=target.host,
+        line_hash_seed=target.host,
+        ingest_method="ssh",
+    )
 
 
 def validate_ssh_setup(settings: AppConfig) -> Optional[str]:
