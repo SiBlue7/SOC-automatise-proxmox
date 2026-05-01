@@ -1,7 +1,7 @@
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 
@@ -11,7 +11,10 @@ FAILED_PASSWORD_RE = re.compile(
 INVALID_USER_RE = re.compile(r"Invalid user (?P<username>\S+) from (?P<source_ip>\S+)")
 ACCEPTED_PASSWORD_RE = re.compile(r"Accepted \S+ for (?P<username>\S+) from (?P<source_ip>\S+)")
 PRI_RE = re.compile(r"^<\d{1,3}>")
-ISO_TS_RE = re.compile(r"^(?:<\d{1,3}>1\s+|<\d{1,3}>)?(?P<ts>\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2})")
+ISO_TS_RE = re.compile(
+    r"^(?:<\d{1,3}>1\s+|<\d{1,3}>)?"
+    r"(?P<ts>\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2}|Z)?)"
+)
 SYSLOG_TS_RE = re.compile(r"^(?:<\d{1,3}>)?(?P<ts>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})")
 SYSLOG_HOST_RE = re.compile(
     r"^(?:<\d{1,3}>)?"
@@ -66,9 +69,12 @@ def parse_auth_log_line(line: str, fallback: datetime) -> Optional[ParsedAuthEve
 def parse_log_timestamp(line: str, fallback: datetime) -> datetime:
     iso_match = ISO_TS_RE.match(line)
     if iso_match:
-        value = iso_match.group("ts").replace("T", " ")
+        value = iso_match.group("ts").replace("T", " ").replace("Z", "+00:00")
         try:
-            return datetime.fromisoformat(value)
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
         except ValueError:
             pass
 

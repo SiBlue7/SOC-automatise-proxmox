@@ -431,7 +431,7 @@ def fetch_ssh_failure_counts(db_path: str, node: str, since: datetime) -> Dict[i
             SELECT vmid, COUNT(*) AS count
             FROM ssh_events
             WHERE node = ?
-              AND timestamp >= ?
+              AND collected_at >= ?
               AND event_type IN ('failed_password', 'invalid_user')
             GROUP BY vmid
             """,
