@@ -195,6 +195,38 @@ def css_for_theme(theme: str) -> str:
     h1, h2, h3, h4, p, label, span {{
         color: var(--soc-text);
     }}
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] div {{
+        color: var(--soc-text);
+    }}
+    [data-testid="stSidebar"] [data-baseweb="select"] span,
+    [data-testid="stSidebar"] [data-baseweb="radio"] span {{
+        color: var(--soc-text);
+    }}
+    .soc-nav-panel {{
+        background: var(--soc-primary-soft);
+        border: 1px solid var(--soc-primary);
+        border-radius: 8px;
+        padding: 12px;
+        margin: 8px 0 14px 0;
+    }}
+    .soc-nav-title {{
+        color: var(--soc-primary);
+        font-size: 12px;
+        font-weight: 850;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+    }}
+    .soc-nav-copy {{
+        color: var(--soc-text);
+        font-size: 13px;
+        line-height: 1.35;
+    }}
     div[data-testid="stMetric"] {{
         background: var(--soc-surface);
         border: 1px solid var(--soc-border);
@@ -258,6 +290,7 @@ def css_for_theme(theme: str) -> str:
         border-radius: 8px;
         padding: 16px;
         min-height: 116px;
+        margin-bottom: 14px;
         box-shadow: 0 10px 24px rgba(0,0,0,0.08);
     }}
     .soc-card-title {{
@@ -284,8 +317,15 @@ def css_for_theme(theme: str) -> str:
         background: var(--soc-surface);
         border: 1px solid var(--soc-border);
         border-radius: 8px;
-        padding: 16px;
-        margin: 10px 0 16px 0;
+        padding: 18px;
+        margin: 14px 0 20px 0;
+    }}
+    .soc-band {{
+        background: var(--soc-surface);
+        border: 1px solid var(--soc-border);
+        border-radius: 8px;
+        padding: 18px;
+        margin: 18px 0 24px 0;
     }}
     .soc-section-title {{
         color: var(--soc-text);
@@ -371,6 +411,10 @@ def render_section(title: str, subtitle: str = "") -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_nav_hint(current_page: str) -> None:
+    st.caption(f"Page active: {current_page}")
 
 
 def tone_for_severity(severity: str) -> str:
@@ -692,6 +736,7 @@ def render_soc_overview(
     active_incidents = metrics["active_incidents"]
     active_alerts = metrics["active_alerts"]
 
+    render_section("Posture SOC", "Ce groupe resume ce que l'analyste doit traiter maintenant.")
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     with kpi1:
         render_kpi_card(
@@ -712,6 +757,8 @@ def render_soc_overview(
     with kpi4:
         render_kpi_card("Actions", metrics["total_actions"], "Isolements/restaurations audites", "neutral")
 
+    st.markdown("<br>", unsafe_allow_html=True)
+    render_section("Sante plateforme", "Etat du collecteur Proxmox, de l'ingestion Syslog et du noeud surveille.")
     service_col1, service_col2, service_col3 = st.columns(3)
     collector_state = collector_snapshot(settings)
     syslog_state = syslog_snapshot(settings)
@@ -738,7 +785,8 @@ def render_soc_overview(
             "warning" if cpu_percent >= settings.host_cpu_warn else "success",
         )
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
+    render_section("Traitement", "Incidents a analyser et dernieres actions de reponse.")
     left, right = st.columns([1.2, 1])
     with left:
         render_section("Incidents prioritaires", "Incidents non clos, tries par severite et date.")
@@ -1455,7 +1503,18 @@ navigation_options = [
 ]
 
 with st.sidebar:
-    navigation = st.selectbox("Navigation", options=navigation_options)
+    st.markdown(
+        """
+        <div class="soc-nav-panel">
+          <div class="soc-nav-title">Navigation</div>
+          <div class="soc-nav-copy">Choisis la page de travail dans le menu ci-dessous.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    navigation = st.radio("Page", options=navigation_options, index=0)
+    st.caption(f"Page active: {navigation}")
+    st.divider()
     selected_node = st.selectbox("Noeud", options=node_names, index=default_node_index)
     refresh_label = st.selectbox("Rafraichissement", options=list(refresh_options.keys()), index=1)
     st.divider()
