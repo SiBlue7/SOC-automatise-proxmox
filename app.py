@@ -577,7 +577,16 @@ def render_incident_workflow_controls(
     incident_id = int(incident["id"])
     status = str(incident["status"])
     next_step = incident_next_step(status)
+    linked_alerts = fetch_incident_alerts(settings.db_path, incident_id)
+    active_alert_count = sum(1 for alert in linked_alerts if alert.get("status") == "active")
+    closure_blocked = next_step["target"] == "resolved" and active_alert_count > 0
     st.caption(next_step["message"])
+    if closure_blocked:
+        st.warning(
+            "Cloture indisponible: une alerte liee est encore active. "
+            f"Attends la resolution du signal ou la fin de la fenetre SSH "
+            f"({settings.ssh_correlation_window_seconds}s)."
+        )
 
     if show_workspace_button:
         action_col, workspace_col, secondary_col = st.columns([1.5, 1.5, 1])
@@ -590,7 +599,9 @@ def render_incident_workflow_controls(
             type="primary" if status != "resolved" else "secondary",
             use_container_width=True,
             key=f"{key_prefix}_incident_next_{incident_id}_{next_step['target']}",
+            disabled=closure_blocked,
         ):
+            st.session_state["active_incident_id"] = incident_id
             update_incident_status(settings.db_path, incident_id, next_step["target"])
             st.rerun()
     if workspace_col is not None:
@@ -609,6 +620,7 @@ def render_incident_workflow_controls(
                 use_container_width=True,
                 key=f"{key_prefix}_incident_back_open_{incident_id}",
             ):
+                st.session_state["active_incident_id"] = incident_id
                 update_incident_status(settings.db_path, incident_id, "open")
                 st.rerun()
 
@@ -1377,8 +1389,23 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
             f"{severity_badge(str(incident['severity']))} | {incident['title']}": int(incident["id"])
             for incident in incidents
         }
-        selected_incident_label = st.selectbox("Incident a analyser", options=list(incident_options.keys()))
+        incident_labels = list(incident_options.keys())
+        stored_incident_id = st.session_state.get("active_incident_id")
+        default_index = next(
+            (
+                index
+                for index, label in enumerate(incident_labels)
+                if incident_options[label] == stored_incident_id
+            ),
+            0,
+        )
+        selected_incident_label = st.selectbox(
+            "Incident a analyser",
+            options=incident_labels,
+            index=default_index,
+        )
         selected_incident_id = incident_options[selected_incident_label]
+        st.session_state["active_incident_id"] = selected_incident_id
         selected_incident = next(incident for incident in incidents if int(incident["id"]) == selected_incident_id)
 
         detail_col1, detail_col2, detail_col3, detail_col4 = st.columns(4)
