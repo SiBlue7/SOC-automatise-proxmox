@@ -311,7 +311,9 @@ def save_resource_limits(out: Path, prefix: str, stats: Dict[str, Dict[str, floa
     ax.set_ylim(0, 105)
     ax.set_xlim(0, 60)
     ax.set_ylabel("Utilisation (%)")
-    ax.set_xlabel("Temps expérimental")
+    # Les segments colorés nomment déjà l'axe temporel ; garder un label X crée
+    # un chevauchement sur les exports poster.
+    ax.set_xlabel("")
     ax.set_xticks([])
     ax.grid(axis="y", alpha=0.25)
     ax.legend(loc="lower left", ncol=2, frameon=False, bbox_to_anchor=(0.0, -0.16))
@@ -343,7 +345,7 @@ def save_iforest_score(out: Path, prefix: str, stats: Dict[str, Dict[str, float]
     ax.set_ylim(0, 1)
     ax.set_xlim(0, 60)
     ax.set_ylabel("Score d’anomalie")
-    ax.set_xlabel("Temps expérimental")
+    ax.set_xlabel("")
     ax.set_xticks([])
     ax.grid(axis="y", alpha=0.25)
     fig.suptitle("Isolation Forest : score d’anomalie corrélé aux comportements", fontweight="bold", y=0.965)
