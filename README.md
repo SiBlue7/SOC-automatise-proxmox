@@ -320,6 +320,22 @@ Sorties ML :
 - `analysis_output/ml_09_ml_model_evaluation.png` : exactitude, rappel et precision de l'evaluation.
 - `analysis_output/ml_10_ml_anomalies_by_vm.png` : anomalies ML par VM.
 
+Generer les figures synthetiques propres pour le poster :
+
+```powershell
+docker compose run --rm proxmox-soc python analysis/generate_poster_figures.py --out analysis_output/poster_figures --filename-prefix poster_
+```
+
+Sorties poster :
+
+- `analysis_output/poster_figures/poster_01_regles_cpu_ram_limites.png`
+- `analysis_output/poster_figures/poster_02_regles_confusion_matrix.png`
+- `analysis_output/poster_figures/poster_04_iforest_score_anomalie.png`
+- `analysis_output/poster_figures/poster_05_iforest_confusion_matrix_projection.png`
+- `analysis_output/poster_figures/poster_07_comparaison_delais_regles_vs_iforest.png`
+
+Ces figures sont faites pour la lisibilite du poster. Elles ne remplacent pas les figures experimentales detaillees du memoire.
+
 ## Extension ML
 
 L'extension Isolation Forest sert a tester une hypothese d'amelioration : une detection non supervisee peut mieux exploiter la forme d'un comportement qu'un seuil CPU/RAM isole.
