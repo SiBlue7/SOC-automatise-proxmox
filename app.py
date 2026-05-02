@@ -1,5 +1,6 @@
 from datetime import datetime
 from html import escape
+import json
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -8,6 +9,7 @@ import streamlit as st
 from actions import get_net0_state, is_protected_vmid, set_vm_network_state
 from config import AppConfig, read_settings
 from detection import AlertCandidate, evaluate_detection
+from ml_model import MODEL_NAME, MODEL_VERSION, train_and_save_model
 from proxmox_client import (
     connect_proxmox_with_token,
     fetch_node_status,
@@ -22,14 +24,18 @@ from storage import (
     fetch_incident_timeline,
     fetch_incidents,
     fetch_latest_collector_run,
+    fetch_latest_ml_model_run,
+    fetch_latest_ml_scores,
     fetch_latest_ssh_event,
     fetch_latest_syslog_run,
+    fetch_recent_ml_scores,
     fetch_recent_ssh_events,
     fetch_soc_metrics,
     init_db,
     insert_action,
     insert_host_metric,
     insert_vm_metric,
+    record_ml_model_run,
     resolve_alerts_for_node,
     update_incident_status,
     upsert_alert,
@@ -1360,6 +1366,44 @@ def format_ssh_events_dataframe(events: List[Dict[str, object]]) -> pd.DataFrame
     return frame
 
 
+def format_ml_scores_dataframe(scores: List[Dict[str, object]]) -> pd.DataFrame:
+    frame = pd.DataFrame(scores)
+    if frame.empty:
+        return frame
+    if "is_anomaly" in frame:
+        frame["is_anomaly"] = frame["is_anomaly"].map(lambda value: "Oui" if int(value) else "Non")
+    if "feature_json" in frame:
+        def compact_features(raw: object) -> str:
+            try:
+                data = json.loads(str(raw))
+            except Exception:
+                return str(raw)
+            return (
+                f"CPU {float(data.get('cpu_percent', 0.0)):.1f}% | "
+                f"RAM {float(data.get('ram_percent', 0.0)):.1f}% | "
+                f"SSH {float(data.get('ssh_failed_count', 0.0)):.0f}"
+            )
+
+        frame["feature_json"] = frame["feature_json"].map(compact_features)
+    frame = frame.rename(
+        columns={
+            "id": "ID",
+            "timestamp": "Horodatage",
+            "node": "Noeud",
+            "vmid": "VMID",
+            "model_name": "Modele",
+            "model_version": "Version",
+            "anomaly_score": "Score anomalie",
+            "raw_score": "Score brut",
+            "is_anomaly": "Anomalie",
+            "severity": "Severite",
+            "feature_json": "Features",
+            "message": "Message",
+        }
+    )
+    return frame
+
+
 def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses: Dict[int, Dict[str, object]]) -> None:
     render_soc_metrics(settings)
     st.divider()
@@ -1777,6 +1821,111 @@ def render_audit_tab(settings: AppConfig) -> None:
         st.dataframe(actions_frame, use_container_width=True, hide_index=True)
 
 
+def render_ml_analysis_tab(settings: AppConfig, node_names: List[str], selected_node: str, vm_statuses: Dict[int, Dict[str, object]]) -> None:
+    render_section(
+        "Analyse ML",
+        "Extension Isolation Forest pour scorer les anomalies comportementales a partir des metriques et logs SSH.",
+    )
+    if not settings.ml_enabled:
+        st.info("Le module ML est desactive. Active ML_ENABLED=True dans le fichier .env.")
+        return
+
+    latest_run = fetch_latest_ml_model_run(settings.db_path)
+    run_col1, run_col2, run_col3, run_col4 = st.columns(4)
+    if latest_run:
+        run_col1.metric("Modele", latest_run["model_name"])
+        run_col2.metric("Statut", latest_run["status"])
+        run_col3.metric("Lignes train", latest_run["training_rows"])
+        accuracy = latest_run.get("accuracy")
+        run_col4.metric("Exactitude eval.", f"{float(accuracy) * 100:.0f}%" if accuracy is not None else "n/a")
+        st.caption(
+            f"Dernier entrainement: {latest_run['timestamp']} | "
+            f"Rappel: {float(latest_run.get('recall') or 0.0) * 100:.0f}% | "
+            f"Precision: {float(latest_run.get('precision') or 0.0) * 100:.0f}% | "
+            f"{latest_run['message']}"
+        )
+    else:
+        run_col1.metric("Modele", MODEL_NAME)
+        run_col2.metric("Statut", "non entraine")
+        run_col3.metric("Lignes train", 0)
+        run_col4.metric("Exactitude eval.", "n/a")
+        st.info("Aucun entrainement ML journalise. Le collecteur peut entrainer automatiquement au demarrage.")
+
+    with st.expander("Entrainer / regenerer le modele", expanded=False):
+        st.write(
+            "Le modele est entraine sur une baseline issue des metriques disponibles, augmentee par des "
+            "scenarios normaux synthetiques. Cette etape sert a evaluer une extension ML sans remplacer "
+            "la detection par regles."
+        )
+        if st.button("Entrainer Isolation Forest maintenant", type="primary"):
+            try:
+                with st.spinner("Entrainement du modele Isolation Forest..."):
+                    bundle = train_and_save_model(settings)
+                    evaluation = bundle.get("evaluation", {})
+                    record_ml_model_run(
+                        settings.db_path,
+                        model_name=str(bundle.get("model_name", MODEL_NAME)),
+                        model_version=str(bundle.get("model_version", MODEL_VERSION)),
+                        status="success",
+                        training_rows=int(bundle.get("training_rows", 0)),
+                        evaluation_rows=int(evaluation.get("evaluation_rows", 0)),
+                        accuracy=float(evaluation.get("accuracy", 0.0)),
+                        recall=float(evaluation.get("recall", 0.0)),
+                        precision=float(evaluation.get("precision", 0.0)),
+                        message="Entrainement manuel depuis l'interface Streamlit.",
+                    )
+                st.success("Modele entraine et sauvegarde. Redemarre le collecteur pour charger ce modele.")
+                st.rerun()
+            except Exception as exc:
+                record_ml_model_run(
+                    settings.db_path,
+                    model_name=MODEL_NAME,
+                    model_version=MODEL_VERSION,
+                    status="error",
+                    message=str(exc),
+                )
+                st.error(f"Echec entrainement ML: {exc}")
+
+    st.divider()
+    render_section("Scores live", "Derniers scores Isolation Forest calcules par VM.")
+    latest_scores = fetch_latest_ml_scores(settings.db_path, node=selected_node)
+    if latest_scores:
+        latest_frame = format_ml_scores_dataframe(latest_scores)
+        st.dataframe(latest_frame, use_container_width=True, hide_index=True)
+    else:
+        st.info("Aucun score ML persiste pour le moment. Le collecteur doit tourner avec ML_ENABLED=True.")
+
+    filter_col1, filter_col2 = st.columns(2)
+    node_filter = filter_col1.selectbox("Noeud ML", options=["Tous", *node_names], index=node_names.index(selected_node) + 1 if selected_node in node_names else 0)
+    vm_choices = {"Toutes": None}
+    for vmid in sorted(vm_statuses):
+        vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
+    vm_filter_label = filter_col2.selectbox("VM ML", options=list(vm_choices.keys()))
+
+    scores = fetch_recent_ml_scores(
+        settings.db_path,
+        limit=400,
+        node=node_filter,
+        vmid=vm_choices[vm_filter_label],
+    )
+    if not scores:
+        st.info("Aucun historique ML ne correspond aux filtres.")
+        return
+
+    scores_frame = pd.DataFrame(scores)
+    scores_frame["timestamp"] = pd.to_datetime(scores_frame["timestamp"], errors="coerce")
+    chart_frame = scores_frame.dropna(subset=["timestamp"]).sort_values("timestamp")
+    if not chart_frame.empty:
+        pivot = chart_frame.pivot_table(
+            index="timestamp",
+            columns="vmid",
+            values="anomaly_score",
+            aggfunc="max",
+        )
+        st.line_chart(pivot, height=260, use_container_width=True)
+    st.dataframe(format_ml_scores_dataframe(scores), use_container_width=True, hide_index=True)
+
+
 def render_ssh_events_tab(settings: AppConfig, node_names: List[str], vm_statuses: Dict[int, Dict[str, object]]) -> None:
     render_section("Logs SSH / Syslog", "Evenements normalises recus depuis rsyslog ou le fallback SSH.")
     if not settings.ssh_log_targets and not settings.syslog_vm_map:
@@ -1843,6 +1992,7 @@ navigation_options = [
     "Supervision Proxmox",
     "Reponse active",
     "Logs SSH / Syslog",
+    "Analyse ML",
     "Audit",
     "Plateforme",
 ]
@@ -1969,6 +2119,8 @@ def render_dashboard() -> None:
         render_response_tab(settings, proxmox, selected_node, vm_statuses)
     elif navigation == "Logs SSH / Syslog":
         render_ssh_events_tab(settings, node_names, vm_statuses)
+    elif navigation == "Analyse ML":
+        render_ml_analysis_tab(settings, node_names, selected_node, vm_statuses)
     elif navigation == "Audit":
         render_audit_tab(settings)
     elif navigation == "Plateforme":

@@ -59,6 +59,14 @@ class AppConfig:
     syslog_protocols: Set[str]
     syslog_default_node: str
     syslog_vm_map: List[SyslogVmMapping]
+    ml_enabled: bool
+    ml_auto_train: bool
+    ml_model_path: str
+    ml_contamination: float
+    ml_score_warn: float
+    ml_score_critical: float
+    ml_train_synthetic_samples: int
+    ml_evaluation_synthetic_samples: int
 
 
 def parse_bool(value: Optional[str], default: bool = False) -> bool:
@@ -223,6 +231,11 @@ def read_settings() -> AppConfig:
         raise ValueError("ALERT_VM_CPU_WARN doit etre inferieur a ALERT_VM_CPU_CRITICAL.")
     if vm_ram_warn >= vm_ram_critical:
         raise ValueError("ALERT_VM_RAM_WARN doit etre inferieur a ALERT_VM_RAM_CRITICAL.")
+    ml_score_warn = parse_float_env("ML_SCORE_WARN", 70.0)
+    ml_score_critical = parse_float_env("ML_SCORE_CRITICAL", 85.0)
+    if ml_score_warn >= ml_score_critical:
+        raise ValueError("ML_SCORE_WARN doit etre inferieur a ML_SCORE_CRITICAL.")
+    ml_contamination = parse_float_env("ML_CONTAMINATION", 0.08, minimum=0.001, maximum=0.5)
 
     ssh_auth_failure_warn = parse_int_env("SSH_AUTH_FAILURE_WARN", 5, minimum=1)
     ssh_auth_failure_critical = parse_int_env("SSH_AUTH_FAILURE_CRITICAL", 20, minimum=1)
@@ -270,4 +283,13 @@ def read_settings() -> AppConfig:
         syslog_protocols=parse_syslog_protocols(os.getenv("SYSLOG_PROTOCOLS")),
         syslog_default_node=syslog_default_node,
         syslog_vm_map=parse_syslog_vm_map(os.getenv("SYSLOG_VM_MAP"), syslog_default_node),
+        ml_enabled=parse_bool(os.getenv("ML_ENABLED"), default=True),
+        ml_auto_train=parse_bool(os.getenv("ML_AUTO_TRAIN"), default=True),
+        ml_model_path=os.getenv("ML_MODEL_PATH", "/data/models/isolation_forest.joblib").strip()
+        or "/data/models/isolation_forest.joblib",
+        ml_contamination=ml_contamination,
+        ml_score_warn=ml_score_warn,
+        ml_score_critical=ml_score_critical,
+        ml_train_synthetic_samples=parse_int_env("ML_TRAIN_SYNTHETIC_SAMPLES", 800, minimum=100),
+        ml_evaluation_synthetic_samples=parse_int_env("ML_EVALUATION_SYNTHETIC_SAMPLES", 100, minimum=20),
     )

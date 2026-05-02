@@ -13,6 +13,10 @@ SSH_EVENT_TYPES = {
     "ssh_success_after_failures",
 }
 
+ML_EVENT_TYPES = {
+    "ml_isolation_forest_anomaly",
+}
+
 
 def parse_source_identity(alert: AlertCandidate) -> Tuple[Optional[str], Optional[str]]:
     parts = alert.alert_key.split(":")
@@ -37,6 +41,15 @@ def incident_fields_for_alert(alert: AlertCandidate) -> Tuple[str, str, str, Opt
             "resource_pressure",
             f"Pression ressources sur VM {alert.vmid}",
             f"{alert.node}:{alert.vmid}:resource_pressure:{bucket}",
+            None,
+            None,
+        )
+
+    if alert.event_type in ML_EVENT_TYPES:
+        return (
+            "ml_anomaly",
+            f"Anomalie ML sur VM {alert.vmid}",
+            f"{alert.node}:{alert.vmid}:ml_anomaly:{bucket}",
             None,
             None,
         )

@@ -22,6 +22,8 @@ L'approche reste volontairement progressive :
 - `ssh_log_collector.py` : fallback optionnel par connexion SSH, desactive par defaut.
 - `auth_log_parser.py` : parsing commun des evenements SSH.
 - `incident_engine.py` : regroupement des alertes en incidents correles.
+- `ml_model.py` : entrainement et scoring Isolation Forest sur donnees augmentees.
+- `train_ml_model.py` : entrainement manuel du modele ML.
 - `config.py` : lecture et validation du `.env`.
 - `proxmox_client.py` : connexion API et collecte Proxmox.
 - `detection.py` : regles d'alertes, score et severite.
@@ -77,6 +79,14 @@ SSH_DISTRIBUTED_SOURCE_WARN=3
 SSH_SUCCESS_AFTER_FAILURE_WARN=3
 SSH_CORRELATION_CPU_THRESHOLD=50
 SSH_CORRELATION_WINDOW_SECONDS=300
+ML_ENABLED=True
+ML_AUTO_TRAIN=True
+ML_MODEL_PATH=/data/models/isolation_forest.joblib
+ML_CONTAMINATION=0.08
+ML_SCORE_WARN=70
+ML_SCORE_CRITICAL=85
+ML_TRAIN_SYNTHETIC_SAMPLES=800
+ML_EVALUATION_SYNTHETIC_SAMPLES=100
 ```
 
 `PROTECTED_VMIDS` accepte une liste separee par virgules, par exemple `100,101`. Ces VM ne peuvent pas etre isolees depuis le dashboard.
@@ -90,6 +100,32 @@ SYSLOG_VM_MAP=103:192.168.1.139:demo-target:pve;104:192.168.1.140:web-01:pve
 ```
 
 `host` peut etre l'adresse IP source ou le hostname envoye par rsyslog. Si le noeud n'est pas precise, `SYSLOG_DEFAULT_NODE` est utilise.
+
+### Configuration ML Isolation Forest
+
+Le module ML est une extension experimentale du POC. Il entraine un modele Isolation Forest a partir :
+
+- des metriques VM deja stockees en SQLite ;
+- d'une baseline augmentee pour representer les usages normaux attendus ;
+- des signaux de logs SSH deja normalises par Syslog.
+
+Variables principales :
+
+- `ML_ENABLED=True` active le scoring ML dans `proxmox-collector`.
+- `ML_AUTO_TRAIN=True` entraine automatiquement un modele si aucun fichier n'existe.
+- `ML_MODEL_PATH=/data/models/isolation_forest.joblib` stocke le modele dans le volume persistant Docker.
+- `ML_SCORE_WARN=70` ouvre une alerte ML medium.
+- `ML_SCORE_CRITICAL=85` ouvre une alerte ML critical.
+- `ML_CONTAMINATION=0.08` fixe la proportion d'anomalies attendue pendant l'entrainement Isolation Forest.
+
+Entrainer manuellement le modele :
+
+```powershell
+docker compose run --rm proxmox-soc python train_ml_model.py
+docker compose restart proxmox-collector
+```
+
+Le dashboard contient une page `Analyse ML` pour voir le dernier entrainement, relancer un entrainement, afficher les scores par VM et suivre l'evolution du score d'anomalie.
 
 ### Configuration Syslog des VM Linux
 
@@ -177,6 +213,12 @@ Le service `proxmox-collector` continue de collecter meme si aucune page Streaml
   - alerte `ssh_success_after_failures` si une connexion reussit apres des echecs ;
   - alerte `ssh_cpu_correlated` si les echecs SSH coincident avec une pression CPU ;
   - onglet `Logs SSH / Syslog` pour auditer les evenements collectes.
+- Analyse ML :
+  - entrainement Isolation Forest sur une baseline historique augmentee ;
+  - scoring par VM a chaque cycle du collecteur ;
+  - persistance des scores dans SQLite ;
+  - alerte `ml_isolation_forest_anomaly` si le score depasse le seuil ;
+  - page `Analyse ML` pour comparer l'approche par regles et l'approche ML.
 
 ## Incident Engine
 
@@ -184,6 +226,7 @@ Le moteur d'incidents regroupe les alertes proches dans un objet exploitable par
 
 - `ssh_intrusion` : brute-force, brute-force par source, brute-force distribue, succes apres echecs, correlation SSH/CPU.
 - `resource_pressure` : pression CPU/RAM sur une VM.
+- `ml_anomaly` : anomalie comportementale detectee par Isolation Forest.
 - `host_pressure` : pression ressources sur le noeud Proxmox.
 
 Les incidents sont crees automatiquement par `proxmox-collector`, puis visibles dans `Incidents / Alertes`. Les alertes techniques se resolvent automatiquement quand les conditions disparaissent. Le changement de statut manuel sert surtout a tracer la decision humaine :
@@ -265,16 +308,51 @@ Sorties :
 - `analysis_output/07_ssh_events_timeline.png` : evenements SSH et alertes correlees.
 - `analysis_output/summary_results.md` : synthese prete a reprendre dans le memoire.
 
+Generer les figures ML apres entrainement et collecte de scores :
+
+```powershell
+docker compose run --rm proxmox-soc python analysis/generate_ml_figures.py --db /data/soc_dashboard.sqlite3 --out analysis_output --filename-prefix ml_
+```
+
+Sorties ML :
+
+- `analysis_output/ml_08_ml_score_timeline.png` : score Isolation Forest par VM.
+- `analysis_output/ml_09_ml_model_evaluation.png` : exactitude, rappel et precision de l'evaluation.
+- `analysis_output/ml_10_ml_anomalies_by_vm.png` : anomalies ML par VM.
+
+## Extension ML
+
+L'extension Isolation Forest sert a tester une hypothese d'amelioration : une detection non supervisee peut mieux exploiter la forme d'un comportement qu'un seuil CPU/RAM isole.
+
+Features utilisees par le modele :
+
+- CPU VM en pourcentage ;
+- RAM VM en pourcentage ;
+- variation CPU entre deux collectes ;
+- nombre d'echecs SSH dans la fenetre de correlation ;
+- nombre de sources SSH distinctes ;
+- succes SSH apres echecs.
+
+Le collecteur ecrit les resultats dans `ml_scores` :
+
+- score d'anomalie ;
+- severite ;
+- features utilisees ;
+- message explicatif ;
+- horodatage, noeud et VMID.
+
+Cette partie doit etre presentee comme une extension experimentale : le modele est entraine sur une baseline historique enrichie, puis evalue sur des scenarios controles. Il ne remplace pas encore une validation a grande echelle sur un dataset reel.
+
 ## Justification academique
 
 - Pitkar (2025) soutient l'interet de l'automatisation pour coordonner detection et reponse dans des environnements cloud.
-- Iacovazzi et Raza (2023) motive l'evolution future vers des modeles de type Isolation Forest lorsque l'historique sera suffisant.
+- Iacovazzi et Raza (2023) motive l'evolution vers des modeles de type Isolation Forest pour detecter des comportements systeme anormaux.
 - Lee et al. (2022), SIERRA, inspire la priorisation par score/severite afin d'aider l'analyste.
 - Jindal et al. (2021), IAD, soutient l'interet d'une detection indirecte a partir des metriques de ressources VM/hyperviseur.
 
 ## Limites actuelles
 
-- Detection par seuils explicables, pas encore par apprentissage automatique.
+- Modele Isolation Forest integre comme extension experimentale, mais encore entraine sur donnees historiques augmentees.
 - Polling API regulier, pas d'architecture event-driven.
 - Correlation SSH disponible via Syslog, sans lecture distante repetitive des VM.
 - Pas encore de chiffrement TLS Syslog dans le POC ; a securiser par firewall/reseau prive en lab.

@@ -7,3 +7,6 @@ data/
 *.db
 analysis_output/
 ssh_keys/
+tmp/
+poster_work/
+node_modules/

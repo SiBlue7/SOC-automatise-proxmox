@@ -5,3 +5,5 @@ pandas
 matplotlib
 python-dotenv
 watchdog
+scikit-learn
+joblib

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -166,6 +167,41 @@ def init_db(db_path: str) -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ml_scores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                node TEXT NOT NULL,
+                vmid INTEGER NOT NULL,
+                model_name TEXT NOT NULL,
+                model_version TEXT NOT NULL,
+                anomaly_score REAL NOT NULL,
+                raw_score REAL NOT NULL,
+                is_anomaly INTEGER NOT NULL,
+                severity TEXT NOT NULL,
+                feature_json TEXT NOT NULL,
+                message TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ml_model_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                model_version TEXT NOT NULL,
+                status TEXT NOT NULL,
+                training_rows INTEGER NOT NULL DEFAULT 0,
+                evaluation_rows INTEGER NOT NULL DEFAULT 0,
+                accuracy REAL,
+                recall REAL,
+                precision REAL,
+                message TEXT NOT NULL
+            )
+            """
+        )
         ensure_column(connection, "ssh_events", "ingest_method", "TEXT NOT NULL DEFAULT 'ssh'")
         ensure_column(connection, "ssh_events", "hostname", "TEXT")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_metrics_node_time ON metrics(node, timestamp)")
@@ -180,6 +216,9 @@ def init_db(db_path: str) -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_incidents_status_time ON incidents(status, first_seen)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_incidents_node_vmid ON incidents(node, vmid)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_incident_alerts_alert ON incident_alerts(alert_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ml_scores_node_vmid_time ON ml_scores(node, vmid, timestamp)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ml_scores_anomaly_time ON ml_scores(is_anomaly, timestamp)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_ml_model_runs_time ON ml_model_runs(timestamp)")
 
 
 def insert_host_metric(db_path: str, node: str, node_status: Dict[str, object], timestamp: datetime) -> None:
@@ -239,6 +278,29 @@ def insert_vm_metric(db_path: str, node: str, vm: Dict[str, object], timestamp: 
                 int(vm.get("uptime", 0)),
             ),
         )
+
+
+def fetch_previous_vm_metric(
+    db_path: str,
+    node: str,
+    vmid: int,
+    before: datetime,
+) -> Optional[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id, timestamp, node, vmid, cpu_percent, ram_percent, status, uptime_seconds
+            FROM metrics
+            WHERE node = ?
+              AND vmid = ?
+              AND scope = 'vm'
+              AND timestamp < ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """,
+            (node, vmid, iso_timestamp(before)),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def upsert_alert(db_path: str, alert: AlertCandidate) -> Tuple[int, bool]:
@@ -1015,3 +1077,159 @@ def fetch_soc_metrics(db_path: str) -> Dict[str, object]:
         "avg_mttd": float(avg_mttd or 0.0),
         "avg_mttr": float(avg_mttr or 0.0),
     }
+
+
+def fetch_vm_metric_profile(db_path: str, limit: int = 3000) -> List[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT timestamp, node, vmid, cpu_percent, ram_percent, uptime_seconds
+            FROM metrics
+            WHERE scope = 'vm'
+              AND cpu_percent IS NOT NULL
+              AND ram_percent IS NOT NULL
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def insert_ml_score(db_path: str, score: Dict[str, object]) -> None:
+    feature_payload = score.get("features", {})
+    with connect_db(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO ml_scores (
+                timestamp, node, vmid, model_name, model_version,
+                anomaly_score, raw_score, is_anomaly, severity,
+                feature_json, message
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                score["timestamp"],
+                score["node"],
+                int(score["vmid"]),
+                score["model_name"],
+                score["model_version"],
+                float(score["anomaly_score"]),
+                float(score["raw_score"]),
+                int(bool(score["is_anomaly"])),
+                score["severity"],
+                json.dumps(feature_payload, sort_keys=True),
+                score["message"],
+            ),
+        )
+
+
+def fetch_recent_ml_scores(
+    db_path: str,
+    limit: int = 300,
+    node: Optional[str] = None,
+    vmid: Optional[int] = None,
+) -> List[Dict[str, object]]:
+    clauses = []
+    params: List[object] = []
+    if node and node != "Tous":
+        clauses.append("node = ?")
+        params.append(node)
+    if vmid is not None:
+        clauses.append("vmid = ?")
+        params.append(vmid)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT id, timestamp, node, vmid, model_name, model_version,
+                   anomaly_score, raw_score, is_anomaly, severity,
+                   feature_json, message
+            FROM ml_scores
+            {where_sql}
+            ORDER BY timestamp DESC, id DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def fetch_latest_ml_scores(db_path: str, node: Optional[str] = None) -> List[Dict[str, object]]:
+    node_clause = "AND latest.node = ?" if node and node != "Tous" else ""
+    params: Tuple[object, ...] = (node,) if node and node != "Tous" else ()
+    with connect_db(db_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT latest.id, latest.timestamp, latest.node, latest.vmid,
+                   latest.model_name, latest.model_version, latest.anomaly_score,
+                   latest.raw_score, latest.is_anomaly, latest.severity,
+                   latest.feature_json, latest.message
+            FROM ml_scores AS latest
+            JOIN (
+                SELECT node, vmid, MAX(timestamp) AS timestamp
+                FROM ml_scores
+                GROUP BY node, vmid
+            ) AS grouped
+              ON grouped.node = latest.node
+             AND grouped.vmid = latest.vmid
+             AND grouped.timestamp = latest.timestamp
+            WHERE 1 = 1
+              {node_clause}
+            ORDER BY latest.anomaly_score DESC, latest.timestamp DESC
+            """,
+            params,
+        ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def record_ml_model_run(
+    db_path: str,
+    model_name: str,
+    model_version: str,
+    status: str,
+    message: str,
+    training_rows: int = 0,
+    evaluation_rows: int = 0,
+    accuracy: Optional[float] = None,
+    recall: Optional[float] = None,
+    precision: Optional[float] = None,
+    timestamp: Optional[datetime] = None,
+) -> None:
+    event_time = timestamp or datetime.now()
+    with connect_db(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO ml_model_runs (
+                timestamp, model_name, model_version, status, training_rows,
+                evaluation_rows, accuracy, recall, precision, message
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                iso_timestamp(event_time),
+                model_name,
+                model_version,
+                status,
+                int(training_rows),
+                int(evaluation_rows),
+                accuracy,
+                recall,
+                precision,
+                message,
+            ),
+        )
+
+
+def fetch_latest_ml_model_run(db_path: str) -> Optional[Dict[str, object]]:
+    with connect_db(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT id, timestamp, model_name, model_version, status, training_rows,
+                   evaluation_rows, accuracy, recall, precision, message
+            FROM ml_model_runs
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    return dict(row) if row else None
