@@ -22,3 +22,8 @@ start_time,end_time,scenario,label,vmid,target_ip,is_malicious,expected_alert,ob
 2026-05-01T15:47:00,2026-05-01T15:57:00,hydra,syslog_hydra_short,103,192.168.1.139,true,true,true,Hydra court alerte ssh_bruteforce_suspected lancee puis resolved
 2026-05-01T15:57:00,2026-05-01T16:05:00,mixed,hydra_cpu_syslog_correlation,103,192.168.1.139,true,true,true,Hydra plus CPU alertes ssh_bruteforce_suspected vm_cpu_pressure ssh_cpu_correlated lancees puis resolved
 2026-05-01T16:05:00,2026-05-01T16:10:00,response,hydra_isolation_restore,103,192.168.1.139,true,true,true,Hydra court puis isolement a apparition alerte VM correctement isolee et restauree alerte ssh_bruteforce_suspected resolved
+2026-05-02T09:55:00,2026-05-02T10:00:00,baseline,ux_short_baseline,103,192.168.1.139,false,false,false,Baseline courte avant validation parcours UX aucun incident aucune alerte
+2026-05-02T10:00:00,2026-05-02T10:05:00,syslog_test,manual_logger_syslog,103,192.168.1.139,false,false,false,Test Syslog manuel un log SSH Syslog remonte correctement
+2026-05-02T10:05:00,2026-05-02T10:15:00,ssh_failures,manual_wrong_passwords_below_threshold,103,192.168.1.139,true,false,false,Trois tentatives SSH avec mots de passe rates trois logs SSH Syslog remontes sans incident
+2026-05-02T10:15:00,2026-05-02T10:25:00,hydra,ux_hydra_short_workflow,103,192.168.1.139,true,true,true,Hydra court incident ssh_intrusion cree passage des etapes incident sans probleme pas isolation
+2026-05-02T10:25:00,2026-05-02T10:40:00,mixed,ux_hydra_cpu_isolation_workflow,103,192.168.1.139,true,true,true,Hydra plus CPU avec isolement deux incidents crees ssh_intrusion et resource_pressure premiere etape puis isolement VM contenu incident et cloture des que possible

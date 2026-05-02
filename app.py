@@ -1123,7 +1123,14 @@ def render_platform_tab(
         else:
             st.info("Aucun noeud Proxmox disponible pour le moment.")
     with settings_cols[1]:
-        st.selectbox("Rafraichissement interface", options=list(refresh_options.keys()), key="refresh_label")
+        refresh_labels = list(refresh_options.keys())
+        refresh_index = refresh_labels.index(st.session_state["refresh_label"])
+        selected_refresh_label = st.selectbox(
+            "Rafraichissement interface",
+            options=refresh_labels,
+            index=refresh_index,
+        )
+        st.session_state["refresh_label"] = selected_refresh_label
     with settings_cols[2]:
         st.radio("Theme interface", options=["Sombre", "Clair"], key="theme", horizontal=True)
 
@@ -1840,8 +1847,8 @@ navigation_options = [
     "Plateforme",
 ]
 refresh_options = {
-    "Manuel": None,
     "5 secondes": "5s",
+    "Manuel": None,
     "10 secondes": "10s",
     "30 secondes": "30s",
 }
