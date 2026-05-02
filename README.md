@@ -336,6 +336,31 @@ Sorties poster :
 
 Ces figures sont faites pour la lisibilite du poster. Elles ne remplacent pas les figures experimentales detaillees du memoire.
 
+Generer des figures poster augmentees a partir de la campagne ML reelle :
+
+```powershell
+docker compose run --rm proxmox-soc python analysis/generate_augmented_poster_figures.py --db /data/soc_dashboard.sqlite3 --log experiment_log.csv --out analysis_output/poster_augmented --vmid 103 --target-scenarios 100 --ml-threshold 65 --filename-prefix 2026-05-02_augmented_
+```
+
+Limiter la generation a une fenetre horaire precise :
+
+```powershell
+docker compose run --rm proxmox-soc python analysis/generate_augmented_poster_figures.py --db /data/soc_dashboard.sqlite3 --log experiment_log.csv --out analysis_output/poster_augmented --vmid 103 --start 2026-05-02T15:15:00 --end 2026-05-02T16:15:00 --target-scenarios 100 --ml-threshold 65 --filename-prefix 2026-05-02_augmented_
+```
+
+Sorties poster augmentees :
+
+- `analysis_output/poster_augmented/2026-05-02_augmented_01_regles_cpu_ram_limites.png`
+- `analysis_output/poster_augmented/2026-05-02_augmented_02_regles_confusion_matrix.png`
+- `analysis_output/poster_augmented/2026-05-02_augmented_04_iforest_score_anomalie.png`
+- `analysis_output/poster_augmented/2026-05-02_augmented_05_iforest_confusion_matrix_projection.png`
+- `analysis_output/poster_augmented/2026-05-02_augmented_07_comparaison_delais_regles_vs_iforest.png`
+- `analysis_output/poster_augmented/2026-05-02_augmented_poster_augmented_summary.md`
+
+Ces figures utilisent les observations reelles disponibles dans SQLite, puis construisent un jeu augmente de scenarios comparables. Elles sont adaptees au poster ; pour le memoire, il faut les presenter comme une projection augmentee, et conserver les figures brutes comme preuves experimentales.
+
+Par defaut, `--start`, `--end` et `experiment_log.csv` sont interpretes en heure locale `Europe/Paris`, puis convertis vers l'UTC des conteneurs. Si tes horaires sont deja en UTC, ajoute `--experiment-timezone UTC`.
+
 ## Extension ML
 
 L'extension Isolation Forest sert a tester une hypothese d'amelioration : une detection non supervisee peut mieux exploiter la forme d'un comportement qu'un seuil CPU/RAM isole.
