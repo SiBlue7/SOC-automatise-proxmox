@@ -37,6 +37,7 @@ from storage import (
     insert_vm_metric,
     record_ml_model_run,
     resolve_alerts_for_node,
+    resolve_incidents_for_protected_vmids,
     update_incident_status,
     upsert_alert,
 )
@@ -497,6 +498,20 @@ def compact_actions_frame(actions: List[Dict[str, object]]) -> pd.DataFrame:
         return frame
     wanted = ["Horodatage", "VMID", "Action", "Résultat", "Message"]
     return frame[[column for column in wanted if column in frame.columns]]
+
+
+def filter_protected_incidents(
+    incidents: List[Dict[str, object]],
+    protected_vmids: set[int],
+) -> List[Dict[str, object]]:
+    if not protected_vmids:
+        return incidents
+    filtered: List[Dict[str, object]] = []
+    for incident in incidents:
+        vmid = incident.get("vmid")
+        if vmid is None or int(vmid) not in protected_vmids:
+            filtered.append(incident)
+    return filtered
 
 
 def open_incident_workspace(incident_id: int) -> None:
@@ -1015,7 +1030,10 @@ def render_soc_overview(
         render_section("Incidents prioritaires", "Incidents non clos, triés par sévérité et date.")
         incidents = [
             incident
-            for incident in fetch_incidents(settings.db_path, limit=10, node=selected_node)
+            for incident in filter_protected_incidents(
+                fetch_incidents(settings.db_path, limit=10, node=selected_node),
+                settings.protected_vmids,
+            )
             if incident["status"] != "resolved"
         ]
         render_incident_cards(incidents, limit=4)
@@ -1430,12 +1448,15 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
     incident_status_filter = INCIDENT_STATUS_VALUES.get(incident_status_label_filter)
     status_filter = filter_col5.selectbox("Statut alerte", options=["Tous", "active", "resolved"])
 
-    incidents = fetch_incidents(
-        settings.db_path,
-        node=node_filter,
-        vmid=vm_choices[vm_filter_label],
-        severity=severity_filter,
-        status=incident_status_filter,
+    incidents = filter_protected_incidents(
+        fetch_incidents(
+            settings.db_path,
+            node=node_filter,
+            vmid=vm_choices[vm_filter_label],
+            severity=severity_filter,
+            status=incident_status_filter,
+        ),
+        settings.protected_vmids,
     )
     incidents_frame = compact_incidents_frame(incidents)
     st.subheader("Incidents corrélés")
@@ -1545,9 +1566,12 @@ def render_incident_workspace_tab(
         "Qualification, prise en charge, réponse active et preuves associées depuis un seul écran.",
     )
 
-    incidents = fetch_incidents(settings.db_path, limit=100)
+    incidents = filter_protected_incidents(
+        fetch_incidents(settings.db_path, limit=100),
+        settings.protected_vmids,
+    )
     if not incidents:
-        st.success("Aucun incident n'est disponible pour le moment.")
+        st.success("Aucun incident non protégé n'est disponible pour le moment.")
         return
 
     active_incident_id = st.session_state.get("active_incident_id")
@@ -2039,6 +2063,7 @@ navigation = st.session_state["navigation"]
 try:
     settings = read_settings()
     init_db(settings.db_path)
+    resolve_incidents_for_protected_vmids(settings.db_path, settings.protected_vmids, datetime.now())
     settings_error = ""
 except Exception as exc:
     settings = None

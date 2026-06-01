@@ -34,6 +34,7 @@ from storage import (
     record_collector_run,
     record_ml_model_run,
     resolve_alerts_for_node,
+    resolve_incidents_for_protected_vmids,
     sync_incident_statuses_for_node,
     upsert_alert,
 )
@@ -119,12 +120,15 @@ def run_collection_cycle(
             active_keys.update(alert.alert_key for alert in ml_alerts)
             for alert in evaluation.current_alerts:
                 alert_id, _ = upsert_alert(settings.db_path, alert)
-                upsert_incident_for_alert(settings.db_path, alert_id, alert, sample_time)
+                if alert.vmid not in settings.protected_vmids:
+                    upsert_incident_for_alert(settings.db_path, alert_id, alert, sample_time)
             for alert in ml_alerts:
                 alert_id, _ = upsert_alert(settings.db_path, alert)
-                upsert_incident_for_alert(settings.db_path, alert_id, alert, sample_time)
+                if alert.vmid not in settings.protected_vmids:
+                    upsert_incident_for_alert(settings.db_path, alert_id, alert, sample_time)
             resolve_alerts_for_node(settings.db_path, node_name, active_keys, sample_time)
             sync_incident_statuses_for_node(settings.db_path, node_name, sample_time)
+            resolve_incidents_for_protected_vmids(settings.db_path, settings.protected_vmids, sample_time)
 
             nodes_seen += 1
             vm_count += len(vm_statuses)

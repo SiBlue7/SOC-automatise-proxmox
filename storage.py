@@ -884,6 +884,29 @@ def sync_incident_statuses_for_node(db_path: str, node: str, resolved_at: dateti
         )
 
 
+def resolve_incidents_for_protected_vmids(
+    db_path: str,
+    protected_vmids: Iterable[int],
+    resolved_at: Optional[datetime] = None,
+) -> None:
+    vmids = sorted({int(vmid) for vmid in protected_vmids})
+    if not vmids:
+        return
+
+    event_time = resolved_at or datetime.now()
+    placeholders = ", ".join("?" for _ in vmids)
+    with connect_db(db_path) as connection:
+        connection.execute(
+            f"""
+            UPDATE incidents
+            SET status = 'resolved', resolved_at = ?
+            WHERE vmid IN ({placeholders})
+              AND status != 'resolved'
+            """,
+            (iso_timestamp(event_time), *vmids),
+        )
+
+
 def update_incident_status(
     db_path: str,
     incident_id: int,
