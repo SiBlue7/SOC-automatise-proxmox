@@ -471,14 +471,14 @@ def compact_incidents_frame(incidents: List[Dict[str, object]]) -> pd.DataFrame:
     wanted = [
         "ID",
         "Statut",
-        "Severite",
+        "Sévérité",
         "Score",
         "VMID",
         "Titre",
         "Source",
         "Utilisateur",
-        "Derniere activite",
-        "Synthese",
+        "Dernière activité",
+        "Synthèse",
     ]
     return frame[[column for column in wanted if column in frame.columns]]
 
@@ -487,7 +487,7 @@ def compact_alerts_frame(alerts: List[Dict[str, object]]) -> pd.DataFrame:
     frame = format_alerts_dataframe(alerts)
     if frame.empty:
         return frame
-    wanted = ["ID", "Severite", "Score", "VMID", "Type", "Valeur", "Statut", "Derniere vue", "Message"]
+    wanted = ["ID", "Sévérité", "Score", "VMID", "Type", "Valeur", "Statut", "Dernière vue", "Message"]
     return frame[[column for column in wanted if column in frame.columns]]
 
 
@@ -495,7 +495,7 @@ def compact_actions_frame(actions: List[Dict[str, object]]) -> pd.DataFrame:
     frame = format_actions_dataframe(actions)
     if frame.empty:
         return frame
-    wanted = ["Horodatage", "VMID", "Action", "Resultat", "Message"]
+    wanted = ["Horodatage", "VMID", "Action", "Résultat", "Message"]
     return frame[[column for column in wanted if column in frame.columns]]
 
 
@@ -553,22 +553,22 @@ def incident_next_step(status: str) -> Dict[str, str]:
         "open": {
             "label": "Prendre en charge",
             "target": "acknowledged",
-            "message": "Incident detecte automatiquement. L'etape suivante est de confirmer qu'il est vu par l'analyste.",
+            "message": "Incident détecté automatiquement. L'étape suivante est de confirmer qu'il est vu par l'analyste.",
         },
         "acknowledged": {
             "label": "Marquer comme contenu",
             "target": "contained",
-            "message": "Incident pris en compte. Marque-le comme contenu apres une isolation, un blocage ou une decision de confinement.",
+            "message": "Incident pris en compte. Marque-le comme contenu après une isolation, un blocage ou une décision de confinement.",
         },
         "contained": {
             "label": "Clore l'incident",
             "target": "resolved",
-            "message": "Incident contenu. Cloture-le quand les alertes sont resolues et que la situation est revenue au calme.",
+            "message": "Incident contenu. Clôture-le quand les alertes sont résolues et que la situation est revenue au calme.",
         },
         "resolved": {
-            "label": "Reouvrir",
+            "label": "Réouvrir",
             "target": "open",
-            "message": "Incident clos. Reouvre-le seulement si une nouvelle analyse montre que le traitement doit continuer.",
+            "message": "Incident clos. Rouvre-le seulement si une nouvelle analyse montre que le traitement doit continuer.",
         },
     }
     return steps.get(status, steps["open"])
@@ -589,8 +589,8 @@ def render_incident_workflow_controls(
     st.caption(next_step["message"])
     if closure_blocked:
         st.warning(
-            "Cloture indisponible: une alerte liee est encore active. "
-            f"Attends la resolution du signal ou la fin de la fenetre SSH "
+            "Clôture indisponible : une alerte liée est encore active. "
+            f"Attends la résolution du signal ou la fin de la fenêtre SSH "
             f"({settings.ssh_correlation_window_seconds}s)."
         )
 
@@ -622,7 +622,7 @@ def render_incident_workflow_controls(
     with secondary_col:
         if status in {"acknowledged", "contained"}:
             if st.button(
-                "Revenir a nouveau",
+                "Revenir à nouveau",
                 use_container_width=True,
                 key=f"{key_prefix}_incident_back_open_{incident_id}",
             ):
@@ -641,7 +641,7 @@ def render_network_response_controls(
     incident_id: Optional[int] = None,
 ) -> None:
     if selected_vmid is None:
-        st.info("Cet incident n'est pas rattache a une VM: aucune action reseau directe n'est proposee.")
+        st.info("Cet incident n'est pas rattaché à une VM : aucune action réseau directe n'est proposée.")
         return
 
     vm_name = str(vm_statuses.get(selected_vmid, {}).get("name") or f"VM {selected_vmid}")
@@ -656,40 +656,43 @@ def render_network_response_controls(
         network_state = get_net0_state(proxmox, node_name, selected_vmid)
     except Exception as exc:
         network_state = None
-        st.error(f"Impossible de lire l'etat de net0: {exc}")
+        st.error(f"Impossible de lire l'état de net0 : {exc}")
 
     state_col1, state_col2, state_col3 = st.columns(3)
     if network_state:
         if network_state.isolated is True:
-            state_value = "Isole"
+            state_value = "Isolé"
             state_tone = "danger"
         elif network_state.isolated is False:
-            state_value = "Connecte"
+            state_value = "Connecté"
             state_tone = "success"
         else:
             state_value = "Inconnu"
             state_tone = "warning"
         with state_col1:
-            render_kpi_card("Etat net0", state_value, network_state.message, state_tone)
+            render_kpi_card("État net0", state_value, network_state.message, state_tone)
     else:
         with state_col1:
-            render_kpi_card("Etat net0", "Erreur", "Lecture impossible", "danger")
+            render_kpi_card("État net0", "Erreur", "Lecture impossible", "danger")
     with state_col2:
         render_kpi_card("VM cible", selected_vmid, selected_label, "neutral")
     with state_col3:
         render_kpi_card(
             "Protection",
-            "Protegee" if protected else "Action possible",
+            "Protégée" if protected else "Action possible",
             "PROTECTED_VMIDS" if protected else "Confirmation requise",
             "warning" if protected else "info",
         )
 
     if protected:
-        st.warning("Cette VM est protegee par PROTECTED_VMIDS: l'isolement est bloque.")
+        st.warning(
+            "Cette VM est protégée par PROTECTED_VMIDS : aucune action réseau "
+            "n'est autorisée depuis le poste incident ou la réponse active."
+        )
 
     confirm_key = f"{key_prefix}_confirm_isolate_{node_name}_{selected_vmid}"
     confirmed = st.checkbox(
-        f"Je confirme l'isolement reseau de la VM {selected_vmid} sur net0.",
+        f"Je confirme l'isolement réseau de la VM {selected_vmid} sur net0.",
         key=confirm_key,
         disabled=protected,
     )
@@ -697,7 +700,7 @@ def render_network_response_controls(
     isolate_col, restore_col = st.columns(2)
     action_result = None
     can_isolate = bool(network_state and network_state.isolated is False and confirmed and not protected)
-    can_restore = bool(network_state and network_state.isolated is True)
+    can_restore = bool(network_state and network_state.isolated is True and not protected)
 
     with isolate_col:
         if st.button(
@@ -708,7 +711,7 @@ def render_network_response_controls(
             key=f"{key_prefix}_isolate_{node_name}_{selected_vmid}",
         ):
             if protected:
-                message = f"Isolation bloquee: VM {selected_vmid} protegee."
+                message = f"Isolation bloquée : VM {selected_vmid} protégée."
                 insert_action(settings.db_path, node_name, selected_vmid, "isolate", "blocked", message, True)
                 action_result = ("error", message)
             else:
@@ -723,7 +726,7 @@ def render_network_response_controls(
                             "target": "contained",
                         }
                 except Exception as exc:
-                    message = f"Echec de l'isolement sur la VM {selected_vmid}: {exc}"
+                    message = f"Échec de l'isolement sur la VM {selected_vmid} : {exc}"
                     insert_action(settings.db_path, node_name, selected_vmid, "isolate", "error", message, protected)
                     action_result = ("error", message)
 
@@ -734,15 +737,20 @@ def render_network_response_controls(
             disabled=not can_restore,
             key=f"{key_prefix}_restore_{node_name}_{selected_vmid}",
         ):
-            try:
-                success, message = set_vm_network_state(proxmox, node_name, selected_vmid, isolated=False)
-                result = "success" if success else "error"
-                insert_action(settings.db_path, node_name, selected_vmid, "restore", result, message, protected)
-                action_result = ("success" if success else "error", message)
-            except Exception as exc:
-                message = f"Echec de la restauration reseau sur la VM {selected_vmid}: {exc}"
-                insert_action(settings.db_path, node_name, selected_vmid, "restore", "error", message, protected)
+            if protected:
+                message = f"Restauration bloquée : VM {selected_vmid} protégée."
+                insert_action(settings.db_path, node_name, selected_vmid, "restore", "blocked", message, True)
                 action_result = ("error", message)
+            else:
+                try:
+                    success, message = set_vm_network_state(proxmox, node_name, selected_vmid, isolated=False)
+                    result = "success" if success else "error"
+                    insert_action(settings.db_path, node_name, selected_vmid, "restore", result, message, protected)
+                    action_result = ("success" if success else "error", message)
+                except Exception as exc:
+                    message = f"Échec de la restauration réseau sur la VM {selected_vmid} : {exc}"
+                    insert_action(settings.db_path, node_name, selected_vmid, "restore", "error", message, protected)
+                    action_result = ("error", message)
 
     if action_result:
         level, message = action_result
@@ -835,7 +843,7 @@ def format_vm_table(vm_statuses: Dict[int, Dict[str, object]]) -> pd.DataFrame:
             {
                 "VMID": vmid,
                 "Nom": vm.get("name") or f"VM {vmid}",
-                "Etat": vm.get("status", "unknown"),
+                "État": vm.get("status", "unknown"),
                 "CPU %": round(float(vm.get("cpu", 0.0)) * 100, 2),
                 "RAM %": round(percent_ratio(mem, maxmem), 2),
                 "RAM utilisee (GiB)": round(bytes_to_gib(mem), 2),
@@ -848,14 +856,14 @@ def format_vm_table(vm_statuses: Dict[int, Dict[str, object]]) -> pd.DataFrame:
 
 def render_line_chart(frame: pd.DataFrame, columns: List[str], height: int = 180) -> None:
     if frame.empty:
-        st.caption("Historique en attente de donnees...")
+        st.caption("Historique en attente de données...")
         return
     st.line_chart(frame[columns], height=height, use_container_width=True)
 
 
 def render_alert_banner(current_alerts: List[AlertCandidate]) -> None:
     if not current_alerts:
-        st.success("Aucune alerte active selon les regles configurees.")
+        st.success("Aucune alerte active selon les règles configurées.")
         return
 
     for alert in current_alerts[:3]:
@@ -915,10 +923,10 @@ def syslog_snapshot(settings: AppConfig) -> Dict[str, object]:
         return {
             "label": "Syslog",
             "value": "Actif",
-            "caption": f"Dernier evenement: VM {latest_event['vmid']} | {latest_event['event_type']}",
+            "caption": f"Dernier événement : VM {latest_event['vmid']} | {latest_event['event_type']}",
             "tone": "success",
         }
-    return {"label": "Syslog", "value": "Ecoute", "caption": "Aucun evenement SSH recent", "tone": "info"}
+    return {"label": "Syslog", "value": "Écoute", "caption": "Aucun événement SSH récent", "tone": "info"}
 
 
 def render_soc_metrics(settings: AppConfig) -> None:
@@ -927,8 +935,8 @@ def render_soc_metrics(settings: AppConfig) -> None:
     col1.metric("Alertes actives", metrics["active_alerts"])
     col2.metric("Incidents ouverts", metrics["active_incidents"])
     col3.metric("Alertes total", metrics["total_alerts"])
-    col4.metric("Actions journalisees", metrics["total_actions"])
-    col5.metric("Evenements SSH", metrics["total_ssh_events"])
+    col4.metric("Actions journalisées", metrics["total_actions"])
+    col5.metric("Événements SSH", metrics["total_ssh_events"])
     st.caption(
         f"Incidents total: {metrics['total_incidents']} | "
         f"MTTD moyen: {format_duration(metrics['avg_mttd'])} | "
@@ -945,7 +953,7 @@ def render_soc_overview(
 ) -> None:
     render_section(
         "Vue SOC",
-        "Priorite aux incidents ouverts, a la sante des collecteurs et aux actions recentes.",
+        "Priorité aux incidents ouverts, à la santé des collecteurs et aux actions récentes.",
     )
     metrics = fetch_soc_metrics(settings.db_path)
     active_incidents = metrics["active_incidents"]
@@ -964,16 +972,16 @@ def render_soc_overview(
         render_kpi_card(
             "Alertes actives",
             active_alerts,
-            f"{metrics['total_alerts']} alertes journalisees",
+            f"{metrics['total_alerts']} alertes journalisées",
             "warning" if active_alerts else "success",
         )
     with kpi3:
-        render_kpi_card("Evenements SSH", metrics["total_ssh_events"], "Logs normalises en SQLite", "info")
+        render_kpi_card("Événements SSH", metrics["total_ssh_events"], "Logs normalisés en SQLite", "info")
     with kpi4:
-        render_kpi_card("Actions", metrics["total_actions"], "Isolements/restaurations audites", "neutral")
+        render_kpi_card("Actions", metrics["total_actions"], "Isolements/restaurations audités", "neutral")
 
     st.markdown("<br>", unsafe_allow_html=True)
-    render_section("Sante plateforme", "Etat du collecteur Proxmox, de l'ingestion Syslog et du noeud surveille.")
+    render_section("Santé plateforme", "État du collecteur Proxmox, de l'ingestion Syslog et du nœud surveillé.")
     service_col1, service_col2, service_col3 = st.columns(3)
     collector_state = collector_snapshot(settings)
     syslog_state = syslog_snapshot(settings)
@@ -994,17 +1002,17 @@ def render_soc_overview(
         )
     with service_col3:
         render_kpi_card(
-            f"Noeud {selected_node}",
+            f"Nœud {selected_node}",
             f"{cpu_percent:.1f}% CPU",
-            f"{len(vm_statuses)} VM QEMU observees",
+            f"{len(vm_statuses)} VM QEMU observées",
             "warning" if cpu_percent >= settings.host_cpu_warn else "success",
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    render_section("Traitement", "Incidents a analyser et dernieres actions de reponse.")
+    render_section("Traitement", "Incidents à analyser et dernières actions de réponse.")
     left, right = st.columns([1.2, 1])
     with left:
-        render_section("Incidents prioritaires", "Incidents non clos, tries par severite et date.")
+        render_section("Incidents prioritaires", "Incidents non clos, triés par sévérité et date.")
         incidents = [
             incident
             for incident in fetch_incidents(settings.db_path, limit=10, node=selected_node)
@@ -1013,14 +1021,14 @@ def render_soc_overview(
         render_incident_cards(incidents, limit=4)
 
     with right:
-        render_section("Alertes live", "Alertes observees sur le rendu courant.")
+        render_section("Alertes live", "Alertes observées sur le rendu courant.")
         render_alert_banner(current_alerts)
         recent_actions = fetch_actions(settings.db_path, limit=5)
         st.markdown("<br>", unsafe_allow_html=True)
-        render_section("Actions recentes", "Dernieres operations de reponse active.")
+        render_section("Actions récentes", "Dernières opérations de réponse active.")
         actions_frame = compact_actions_frame(recent_actions)
         if actions_frame.empty:
-            st.info("Aucune action recente.")
+            st.info("Aucune action récente.")
         else:
             st.dataframe(actions_frame, use_container_width=True, hide_index=True)
 
@@ -1042,7 +1050,7 @@ def render_collector_status(settings: AppConfig) -> None:
     message = str(latest_run["message"])
     details = (
         f"Dernier passage: {format_duration(age_seconds)} | "
-        f"noeuds={latest_run['nodes_seen']} vms={latest_run['vm_count']} "
+        f"nœuds={latest_run['nodes_seen']} vms={latest_run['vm_count']} "
         f"alertes={latest_run['alerts_seen']}"
     )
 
@@ -1062,7 +1070,7 @@ def render_collector_status(settings: AppConfig) -> None:
 
 def render_syslog_status(settings: AppConfig) -> None:
     if not settings.syslog_enabled:
-        st.caption("Syslog: desactive.")
+        st.caption("Syslog : désactivé.")
         return
 
     latest_run = fetch_latest_syslog_run(settings.db_path)
@@ -1082,7 +1090,7 @@ def render_syslog_status(settings: AppConfig) -> None:
     status = str(latest_run["status"])
     details = (
         f"Dernier statut: {format_duration(age_seconds)} | "
-        f"vus={latest_run['events_seen']} inseres={latest_run['events_inserted']}"
+        f"vus={latest_run['events_seen']} insérés={latest_run['events_inserted']}"
     )
     message = str(latest_run["message"])
 
@@ -1093,7 +1101,7 @@ def render_syslog_status(settings: AppConfig) -> None:
         st.warning(f"Syslog: attention. {details}")
         st.caption(message)
     elif status == "disabled":
-        st.caption("Syslog: desactive.")
+        st.caption("Syslog : désactivé.")
     elif latest_event and str(latest_event.get("ingest_method", "")).startswith("syslog"):
         st.success(f"Syslog: actif. {details}")
         st.caption(
@@ -1101,8 +1109,8 @@ def render_syslog_status(settings: AppConfig) -> None:
             f"{latest_event['event_type']} | {latest_event['timestamp']}"
         )
     else:
-        st.success(f"Syslog: en ecoute. {details}")
-        st.caption("Aucun evenement Syslog SSH recu pour le moment.")
+        st.success(f"Syslog : en écoute. {details}")
+        st.caption("Aucun événement Syslog SSH reçu pour le moment.")
 
 
 def render_platform_tab(
@@ -1114,7 +1122,7 @@ def render_platform_tab(
 ) -> None:
     render_section(
         "Plateforme",
-        "Configuration d'exploitation, etat des collecteurs et regles de detection actives.",
+        "Configuration d'exploitation, état des collecteurs et règles de détection actives.",
     )
 
     if st.session_state.get("refresh_label") not in refresh_options:
@@ -1125,9 +1133,9 @@ def render_platform_tab(
     settings_cols = st.columns([1, 1, 1])
     with settings_cols[0]:
         if node_names:
-            st.selectbox("Noeud Proxmox actif", options=node_names, key="selected_node")
+            st.selectbox("Nœud Proxmox actif", options=node_names, key="selected_node")
         else:
-            st.info("Aucun noeud Proxmox disponible pour le moment.")
+            st.info("Aucun nœud Proxmox disponible pour le moment.")
     with settings_cols[1]:
         refresh_labels = list(refresh_options.keys())
         refresh_index = refresh_labels.index(st.session_state["refresh_label"])
@@ -1141,10 +1149,10 @@ def render_platform_tab(
         st.radio("Theme interface", options=["Sombre", "Clair"], key="theme", horizontal=True)
 
     if not hasattr(st, "fragment"):
-        st.info("Cette version de Streamlit ne supporte pas le rafraichissement automatique fragment.")
+        st.info("Cette version de Streamlit ne supporte pas le rafraîchissement automatique fragment.")
 
     st.divider()
-    render_section("Etat des services", "Sante technique du POC et des flux de collecte.")
+    render_section("État des services", "Santé technique du POC et des flux de collecte.")
     service_cols = st.columns(3)
     with service_cols[0]:
         render_kpi_card(
@@ -1172,11 +1180,11 @@ def render_platform_tab(
 
     collector_col, syslog_col = st.columns(2)
     with collector_col:
-        render_section("Collecteur Proxmox", "Collecte continue des metriques hote et VM.")
+        render_section("Collecteur Proxmox", "Collecte continue des métriques hôte et VM.")
         render_collector_status(settings)
-        st.caption(f"Intervalle configure: {settings.collect_interval_seconds}s")
+        st.caption(f"Intervalle configuré : {settings.collect_interval_seconds}s")
     with syslog_col:
-        render_section("Collecteur Syslog", "Reception centralisee des evenements SSH/auth.")
+        render_section("Collecteur Syslog", "Réception centralisée des événements SSH/auth.")
         render_syslog_status(settings)
         protocols = ", ".join(sorted(settings.syslog_protocols))
         st.caption(f"Ecoute: {settings.syslog_bind_host}:{settings.syslog_port} ({protocols})")
@@ -1191,16 +1199,16 @@ def render_platform_tab(
                     "VMID": mapping.vmid,
                     "IP / host": mapping.host,
                     "Nom": mapping.name,
-                    "Noeud": mapping.node,
+                    "Nœud": mapping.node,
                 }
                 for mapping in settings.syslog_vm_map
             ]
             st.dataframe(pd.DataFrame(syslog_rows), use_container_width=True, hide_index=True)
         else:
-            st.info("Aucun mapping SYSLOG_VM_MAP configure.")
+            st.info("Aucun mapping SYSLOG_VM_MAP configuré.")
     with source_cols[1]:
         protected = ", ".join(str(vmid) for vmid in sorted(settings.protected_vmids)) or "Aucune"
-        render_kpi_card("VM protegees", protected, "Ces VM ne peuvent pas etre isolees depuis l'interface.", "info")
+        render_kpi_card("VM protégées", protected, "Ces VM ne peuvent pas être isolées depuis l'interface.", "info")
         if settings.ssh_log_targets:
             fallback_rows = [
                 {
@@ -1213,14 +1221,14 @@ def render_platform_tab(
             ]
             st.dataframe(pd.DataFrame(fallback_rows), use_container_width=True, hide_index=True)
         else:
-            st.caption("Fallback SSH desactive: collecte perenne assuree par Syslog.")
+            st.caption("Fallback SSH désactivé : collecte pérenne assurée par Syslog.")
 
     st.divider()
-    render_section("Regles de detection", "Seuils explicables utilises pour prioriser les alertes.")
+    render_section("Règles de détection", "Seuils explicables utilisés pour prioriser les alertes.")
     rule_cols = st.columns(4)
     with rule_cols[0]:
         render_kpi_card(
-            "CPU hote",
+            "CPU hôte",
             f"{settings.host_cpu_warn:.0f}% / {settings.host_cpu_critical:.0f}%",
             "warning / critical",
             "warning",
@@ -1252,7 +1260,7 @@ def render_platform_tab(
         render_kpi_card(
             "Correlation",
             f"{settings.ssh_correlation_window_seconds}s",
-            "fenetre SSH + CPU",
+            "fenêtre SSH + CPU",
             "info",
         )
     with correlation_cols[1]:
@@ -1278,17 +1286,17 @@ def format_alerts_dataframe(alerts: List[Dict[str, object]]) -> pd.DataFrame:
     frame = frame.rename(
         columns={
             "id": "ID",
-            "first_seen": "Detection",
-            "last_seen": "Derniere vue",
-            "resolved_at": "Resolution",
-            "node": "Noeud",
+            "first_seen": "Détection",
+            "last_seen": "Dernière vue",
+            "resolved_at": "Résolution",
+            "node": "Nœud",
             "vmid": "VMID",
-            "scope": "Portee",
+            "scope": "Portée",
             "event_type": "Type",
-            "metric": "Metrique",
+            "metric": "Métrique",
             "value": "Valeur",
             "threshold": "Seuil",
-            "severity": "Severite",
+            "severity": "Sévérité",
             "score": "Score",
             "status": "Statut",
             "message": "Message",
@@ -1306,19 +1314,19 @@ def format_incidents_dataframe(incidents: List[Dict[str, object]]) -> pd.DataFra
     frame = frame.rename(
         columns={
             "id": "ID",
-            "first_seen": "Premiere detection",
-            "last_seen": "Derniere activite",
-            "resolved_at": "Resolution",
-            "node": "Noeud",
+            "first_seen": "Première détection",
+            "last_seen": "Dernière activité",
+            "resolved_at": "Résolution",
+            "node": "Nœud",
             "vmid": "VMID",
-            "category": "Categorie",
+            "category": "Catégorie",
             "title": "Titre",
-            "severity": "Severite",
+            "severity": "Sévérité",
             "score": "Score",
             "status": "Statut",
             "source_ip": "Source",
             "username": "Utilisateur",
-            "summary": "Synthese",
+            "summary": "Synthèse",
         }
     )
     return frame
@@ -1332,11 +1340,11 @@ def format_actions_dataframe(actions: List[Dict[str, object]]) -> pd.DataFrame:
         columns={
             "id": "ID",
             "timestamp": "Horodatage",
-            "node": "Noeud",
+            "node": "Nœud",
             "vmid": "VMID",
             "action": "Action",
-            "result": "Resultat",
-            "protected": "VM protegee",
+            "result": "Résultat",
+            "protected": "VM protégée",
             "message": "Message",
         }
     )
@@ -1352,12 +1360,12 @@ def format_ssh_events_dataframe(events: List[Dict[str, object]]) -> pd.DataFrame
             "id": "ID",
             "timestamp": "Horodatage",
             "collected_at": "Collecte",
-            "node": "Noeud",
+            "node": "Nœud",
             "vmid": "VMID",
             "target_host": "Cible",
             "source_ip": "Source",
             "username": "Utilisateur",
-            "event_type": "Evenement",
+            "event_type": "Événement",
             "ingest_method": "Collecteur",
             "hostname": "Hostname",
             "raw_line": "Log brut",
@@ -1389,14 +1397,14 @@ def format_ml_scores_dataframe(scores: List[Dict[str, object]]) -> pd.DataFrame:
         columns={
             "id": "ID",
             "timestamp": "Horodatage",
-            "node": "Noeud",
+            "node": "Nœud",
             "vmid": "VMID",
-            "model_name": "Modele",
+            "model_name": "Modèle",
             "model_version": "Version",
             "anomaly_score": "Score anomalie",
             "raw_score": "Score brut",
             "is_anomaly": "Anomalie",
-            "severity": "Severite",
+            "severity": "Sévérité",
             "feature_json": "Features",
             "message": "Message",
         }
@@ -1409,12 +1417,12 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
     st.divider()
 
     filter_col1, filter_col2, filter_col3, filter_col4, filter_col5 = st.columns(5)
-    node_filter = filter_col1.selectbox("Filtre noeud", options=["Tous", *node_names])
+    node_filter = filter_col1.selectbox("Filtre nœud", options=["Tous", *node_names])
     vm_choices = {"Toutes": None}
     for vmid in sorted(vm_statuses):
         vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
     vm_filter_label = filter_col2.selectbox("Filtre VM", options=list(vm_choices.keys()))
-    severity_filter = filter_col3.selectbox("Severite", options=["Toutes", "critical", "medium", "low"])
+    severity_filter = filter_col3.selectbox("Sévérité", options=["Toutes", "critical", "medium", "low"])
     incident_status_label_filter = filter_col4.selectbox(
         "Statut incident",
         options=["Tous", *INCIDENT_STATUS_VALUES.keys()],
@@ -1430,9 +1438,9 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
         status=incident_status_filter,
     )
     incidents_frame = compact_incidents_frame(incidents)
-    st.subheader("Incidents correles")
+    st.subheader("Incidents corrélés")
     if incidents_frame.empty:
-        st.info("Aucun incident correle ne correspond aux filtres.")
+        st.info("Aucun incident corrélé ne correspond aux filtres.")
     else:
         st.dataframe(incidents_frame, use_container_width=True, hide_index=True)
         incident_options = {
@@ -1451,7 +1459,7 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
             0,
         )
         selected_incident_label = st.selectbox(
-            "Incident a analyser",
+            "Incident à analyser",
             options=incident_labels,
             index=default_index,
         )
@@ -1461,19 +1469,19 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
 
         detail_col1, detail_col2, detail_col3, detail_col4 = st.columns(4)
         detail_col1.metric("Statut", incident_status_label(str(selected_incident["status"])))
-        detail_col2.metric("Severite", severity_badge(str(selected_incident["severity"])))
+        detail_col2.metric("Sévérité", severity_badge(str(selected_incident["severity"])))
         detail_col3.metric("Score", selected_incident["score"])
-        detail_col4.metric("Categorie", selected_incident["category"])
+        detail_col4.metric("Catégorie", selected_incident["category"])
 
         st.info(str(selected_incident["summary"]))
         render_incident_workflow_controls(settings, selected_incident, "incident_list")
         timeline = fetch_incident_timeline(settings.db_path, selected_incident_id)
         timeline_frame = pd.DataFrame(timeline).rename(
-            columns={"timestamp": "Horodatage", "event": "Evenement", "detail": "Detail"}
+            columns={"timestamp": "Horodatage", "event": "Événement", "detail": "Détail"}
         )
         st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
 
-    with st.expander("Alertes brutes liees au moteur", expanded=False):
+    with st.expander("Alertes brutes liées au moteur", expanded=False):
         alerts = fetch_alerts(
             settings.db_path,
             node=node_filter,
@@ -1496,16 +1504,16 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
         timeline_rows = [
             {
                 "Horodatage": selected_alert["first_seen"],
-                "Evenement": "Detection",
-                "Detail": selected_alert["message"],
+                "Événement": "Détection",
+                "Détail": selected_alert["message"],
             }
         ]
         if selected_alert.get("resolved_at"):
             timeline_rows.append(
                 {
                     "Horodatage": selected_alert["resolved_at"],
-                    "Evenement": "Resolution metrique",
-                    "Detail": "La condition d'alerte n'est plus observee.",
+                    "Événement": "Résolution métrique",
+                    "Détail": "La condition d'alerte n'est plus observée.",
                 }
             )
 
@@ -1517,8 +1525,8 @@ def render_incidents_tab(settings: AppConfig, node_names: List[str], vm_statuses
                 timeline_rows.append(
                     {
                         "Horodatage": action["timestamp"],
-                        "Evenement": action["action"],
-                        "Detail": action["message"],
+                        "Événement": action["action"],
+                        "Détail": action["message"],
                     }
                 )
 
@@ -1534,7 +1542,7 @@ def render_incident_workspace_tab(
 ) -> None:
     render_section(
         "Poste incident",
-        "Qualification, prise en charge, reponse active et preuves associees depuis un seul ecran.",
+        "Qualification, prise en charge, réponse active et preuves associées depuis un seul écran.",
     )
 
     incidents = fetch_incidents(settings.db_path, limit=100)
@@ -1573,19 +1581,19 @@ def render_incident_workspace_tab(
             incident_vm_statuses = fetch_vm_statuses(proxmox, incident_node, incident_qemu_vms)
         except Exception as exc:
             incident_vm_statuses = {}
-            st.warning(f"Impossible de charger les VM du noeud {incident_node}: {exc}")
+            st.warning(f"Impossible de charger les VM du nœud {incident_node} : {exc}")
 
     kpi_cols = st.columns(5)
     with kpi_cols[0]:
         render_kpi_card(
             "Statut",
             incident_status_label(str(incident["status"])),
-            "etat du dossier",
+            "état du dossier",
             tone_for_status(str(incident["status"])),
         )
     with kpi_cols[1]:
         render_kpi_card(
-            "Severite",
+            "Sévérité",
             severity_badge(str(incident["severity"])),
             f"score {incident['score']}",
             tone_for_severity(str(incident["severity"])),
@@ -1595,13 +1603,13 @@ def render_incident_workspace_tab(
     with kpi_cols[3]:
         render_kpi_card("Source", incident.get("source_ip") or "-", incident.get("username") or "utilisateur inconnu", "info")
     with kpi_cols[4]:
-        render_kpi_card("Categorie", incident["category"], str(incident["title"]), "neutral")
+        render_kpi_card("Catégorie", incident["category"], str(incident["title"]), "neutral")
 
     st.info(str(incident["summary"]))
 
     workflow_col, response_col = st.columns([1, 1.2])
     with workflow_col:
-        render_section("Decision analyste", "Changer l'etat de l'incident sans quitter le dossier.")
+        render_section("Décision analyste", "Changer l'état de l'incident sans quitter le dossier.")
         render_incident_workflow_controls(settings, incident, "incident_workspace", show_workspace_button=False)
 
         suggestion = st.session_state.get("incident_action_suggestion")
@@ -1610,7 +1618,7 @@ def render_incident_workspace_tab(
             and suggestion.get("incident_id") == selected_incident_id
             and str(incident["status"]) not in {"contained", "resolved"}
         ):
-            st.success("Isolement journalise. Tu peux maintenant marquer l'incident comme contenu.")
+            st.success("Isolement journalisé. Tu peux maintenant marquer l'incident comme contenu.")
             if st.button(
                 "Marquer comme contenu",
                 type="primary",
@@ -1622,7 +1630,7 @@ def render_incident_workspace_tab(
                 st.rerun()
 
     with response_col:
-        render_section("Reponse active", "Action Proxmox ciblee sur la VM de l'incident.")
+        render_section("Réponse active", "Action Proxmox ciblée sur la VM de l'incident.")
         render_network_response_controls(
             settings,
             proxmox,
@@ -1636,28 +1644,28 @@ def render_incident_workspace_tab(
     st.divider()
     evidence_col, audit_col = st.columns([1.15, 1])
     with evidence_col:
-        render_section("Timeline", "Detection, alertes liees, actions et resolution.")
+        render_section("Timeline", "Détection, alertes liées, actions et résolution.")
         timeline = fetch_incident_timeline(settings.db_path, selected_incident_id)
         timeline_frame = pd.DataFrame(timeline).rename(
-            columns={"timestamp": "Horodatage", "event": "Evenement", "detail": "Detail"}
+            columns={"timestamp": "Horodatage", "event": "Événement", "detail": "Détail"}
         )
         if timeline_frame.empty:
-            st.info("Aucun evenement de timeline pour cet incident.")
+            st.info("Aucun événement de timeline pour cet incident.")
         else:
             st.dataframe(timeline_frame, use_container_width=True, hide_index=True)
 
         linked_alerts = fetch_incident_alerts(settings.db_path, selected_incident_id)
         linked_alerts_frame = compact_alerts_frame(linked_alerts)
-        with st.expander("Alertes liees", expanded=False):
+        with st.expander("Alertes liées", expanded=False):
             if linked_alerts_frame.empty:
-                st.info("Aucune alerte liee a cet incident.")
+                st.info("Aucune alerte liée à cet incident.")
             else:
                 st.dataframe(linked_alerts_frame, use_container_width=True, hide_index=True)
 
     with audit_col:
-        render_section("Audit VM", "Actions recentes concernant la VM de l'incident.")
+        render_section("Audit VM", "Actions récentes concernant la VM de l'incident.")
         if incident_vmid is None:
-            st.info("Aucune VM rattachee a cet incident.")
+            st.info("Aucune VM rattachée à cet incident.")
         else:
             vm_actions = [
                 action
@@ -1668,7 +1676,7 @@ def render_incident_workspace_tab(
             ]
             actions_frame = compact_actions_frame(vm_actions)
             if actions_frame.empty:
-                st.info("Aucune action recente sur cette VM.")
+                st.info("Aucune action récente sur cette VM.")
             else:
                 st.dataframe(actions_frame, use_container_width=True, hide_index=True)
 
@@ -1682,7 +1690,7 @@ def render_host_tab(
 ) -> None:
     node_history = history_frame("node_history", selected_node)
 
-    render_section("Supervision Proxmox", f"Noeud surveille: {selected_node}")
+    render_section("Supervision Proxmox", f"Nœud surveillé : {selected_node}")
 
     memory = node_status.get("memory", {})
     swap = node_status.get("swap", {})
@@ -1695,9 +1703,9 @@ def render_host_tab(
     metric_cpu, metric_ram, metric_swap = st.columns(3)
     with metric_cpu:
         render_kpi_card(
-            "CPU host",
+            "CPU hôte",
             f"{cpu_percent:.2f}%",
-            "Noeud Proxmox",
+            "Nœud Proxmox",
             "warning" if cpu_percent >= settings.host_cpu_warn else "success",
         )
     with metric_ram:
@@ -1719,22 +1727,22 @@ def render_host_tab(
     with chart_cpu:
         render_line_chart(node_history, ["CPU %"])
     with chart_ram:
-        render_line_chart(node_history, ["RAM utilisee (GiB)"])
+        render_line_chart(node_history, ["RAM utilisée (GiB)"])
     with chart_swap:
-        render_line_chart(node_history, ["SWAP utilisee (GiB)"])
+        render_line_chart(node_history, ["SWAP utilisée (GiB)"])
 
     render_alert_banner(current_alerts)
 
     st.divider()
-    render_section("Inventaire QEMU", "Etat courant des VM observees via l'API Proxmox.")
+    render_section("Inventaire QEMU", "État courant des VM observées via l'API Proxmox.")
     if vm_statuses:
         st.dataframe(format_vm_table(vm_statuses), use_container_width=True, hide_index=True)
     else:
-        st.info("Aucune VM QEMU detectee sur ce noeud.")
+        st.info("Aucune VM QEMU détectée sur ce nœud.")
 
-    render_section("Statistiques par VM QEMU", "Historique quasi temps reel conserve en session Streamlit.")
+    render_section("Statistiques par VM QEMU", "Historique quasi temps réel conservé en session Streamlit.")
     if not vm_statuses:
-        st.warning("Aucune VM disponible pour afficher une telemetrie detaillee.")
+        st.warning("Aucune VM disponible pour afficher une télémétrie détaillée.")
         return
 
     sorted_vmids = sorted(vm_statuses)
@@ -1750,7 +1758,7 @@ def render_host_tab(
 
         with st.expander(vm_title, expanded=(vmid == stored_vmid)):
             info_col1, info_col2, info_col3 = st.columns(3)
-            info_col1.metric("Etat", str(vm.get("status", "unknown")).upper())
+            info_col1.metric("État", str(vm.get("status", "unknown")).upper())
             info_col2.metric("CPU", f"{float(vm.get('cpu', 0.0)) * 100:.2f}%")
             info_col3.metric(
                 "RAM",
@@ -1761,19 +1769,19 @@ def render_host_tab(
             extra_left, extra_right = st.columns(2)
             extra_left.caption(f"Uptime: {format_uptime(int(vm.get('uptime', 0)))}")
             if vm.get("status_error"):
-                extra_right.caption(f"Details API partiels: {vm['status_error']}")
+                extra_right.caption(f"Détails API partiels : {vm['status_error']}")
 
             chart_left, chart_right = st.columns(2)
             with chart_left:
                 render_line_chart(vm_history, ["CPU %"], height=160)
             with chart_right:
-                render_line_chart(vm_history, ["RAM utilisee (GiB)"], height=160)
+                render_line_chart(vm_history, ["RAM utilisée (GiB)"], height=160)
 
 
 def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_statuses: Dict[int, Dict[str, object]]) -> None:
     render_section(
-        "Reponse active",
-        "Confinement manuel et journalise. Perimetre du POC: VM QEMU uniquement, interface net0 uniquement.",
+        "Réponse active",
+        "Confinement manuel et journalisé. Périmètre du POC : VM QEMU uniquement, interface net0 uniquement.",
     )
 
     if not vm_statuses:
@@ -1785,7 +1793,7 @@ def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_sta
         for vmid in sorted(vm_statuses)
     }
     selected_label = st.selectbox(
-        "VM a isoler ou restaurer",
+        "VM à isoler ou restaurer",
         options=list(vm_options.keys()),
         index=list(vm_options.values()).index(st.session_state["selected_vmid"])
         if st.session_state["selected_vmid"] in vm_options.values()
@@ -1804,19 +1812,19 @@ def render_response_tab(settings: AppConfig, proxmox, selected_node: str, vm_sta
     )
 
     st.divider()
-    st.subheader("Journal d'audit recent")
+    st.subheader("Journal d'audit récent")
     actions_frame = format_actions_dataframe(fetch_actions(settings.db_path, limit=50))
     if actions_frame.empty:
-        st.info("Aucune action journalisee pour le moment.")
+        st.info("Aucune action journalisée pour le moment.")
     else:
         st.dataframe(actions_frame, use_container_width=True, hide_index=True)
 
 
 def render_audit_tab(settings: AppConfig) -> None:
-    render_section("Journal d'audit", "Historique des actions de reponse active et des blocages de protection.")
+    render_section("Journal d'audit", "Historique des actions de réponse active et des blocages de protection.")
     actions_frame = format_actions_dataframe(fetch_actions(settings.db_path, limit=200))
     if actions_frame.empty:
-        st.info("Aucune action de reponse active n'a encore ete journalisee.")
+        st.info("Aucune action de réponse active n'a encore été journalisée.")
     else:
         st.dataframe(actions_frame, use_container_width=True, hide_index=True)
 
@@ -1824,42 +1832,42 @@ def render_audit_tab(settings: AppConfig) -> None:
 def render_ml_analysis_tab(settings: AppConfig, node_names: List[str], selected_node: str, vm_statuses: Dict[int, Dict[str, object]]) -> None:
     render_section(
         "Analyse ML",
-        "Extension Isolation Forest pour scorer les anomalies comportementales a partir des metriques et logs SSH.",
+        "Extension Isolation Forest pour scorer les anomalies comportementales à partir des métriques et logs SSH.",
     )
     if not settings.ml_enabled:
-        st.info("Le module ML est desactive. Active ML_ENABLED=True dans le fichier .env.")
+        st.info("Le module ML est désactivé. Active ML_ENABLED=True dans le fichier .env.")
         return
 
     latest_run = fetch_latest_ml_model_run(settings.db_path)
     run_col1, run_col2, run_col3, run_col4 = st.columns(4)
     if latest_run:
-        run_col1.metric("Modele", latest_run["model_name"])
+        run_col1.metric("Modèle", latest_run["model_name"])
         run_col2.metric("Statut", latest_run["status"])
         run_col3.metric("Lignes train", latest_run["training_rows"])
         accuracy = latest_run.get("accuracy")
-        run_col4.metric("Exactitude eval.", f"{float(accuracy) * 100:.0f}%" if accuracy is not None else "n/a")
+        run_col4.metric("Exactitude éval.", f"{float(accuracy) * 100:.0f}%" if accuracy is not None else "n/a")
         st.caption(
-            f"Dernier entrainement: {latest_run['timestamp']} | "
+            f"Dernier entraînement : {latest_run['timestamp']} | "
             f"Rappel: {float(latest_run.get('recall') or 0.0) * 100:.0f}% | "
-            f"Precision: {float(latest_run.get('precision') or 0.0) * 100:.0f}% | "
+            f"Précision : {float(latest_run.get('precision') or 0.0) * 100:.0f}% | "
             f"{latest_run['message']}"
         )
     else:
-        run_col1.metric("Modele", MODEL_NAME)
-        run_col2.metric("Statut", "non entraine")
+        run_col1.metric("Modèle", MODEL_NAME)
+        run_col2.metric("Statut", "non entraîné")
         run_col3.metric("Lignes train", 0)
-        run_col4.metric("Exactitude eval.", "n/a")
-        st.info("Aucun entrainement ML journalise. Le collecteur peut entrainer automatiquement au demarrage.")
+        run_col4.metric("Exactitude éval.", "n/a")
+        st.info("Aucun entraînement ML journalisé. Le collecteur peut entraîner automatiquement au démarrage.")
 
-    with st.expander("Entrainer / regenerer le modele", expanded=False):
+    with st.expander("Entraîner / régénérer le modèle", expanded=False):
         st.write(
-            "Le modele est entraine sur une baseline issue des metriques disponibles, augmentee par des "
-            "scenarios normaux synthetiques. Cette etape sert a evaluer une extension ML sans remplacer "
-            "la detection par regles."
+            "Le modèle est entraîné sur une baseline issue des métriques disponibles, augmentée par des "
+            "scénarios normaux synthétiques. Cette étape sert à évaluer une extension ML sans remplacer "
+            "la détection par règles."
         )
-        if st.button("Entrainer Isolation Forest maintenant", type="primary"):
+        if st.button("Entraîner Isolation Forest maintenant", type="primary"):
             try:
-                with st.spinner("Entrainement du modele Isolation Forest..."):
+                with st.spinner("Entraînement du modèle Isolation Forest..."):
                     bundle = train_and_save_model(settings)
                     evaluation = bundle.get("evaluation", {})
                     record_ml_model_run(
@@ -1872,9 +1880,9 @@ def render_ml_analysis_tab(settings: AppConfig, node_names: List[str], selected_
                         accuracy=float(evaluation.get("accuracy", 0.0)),
                         recall=float(evaluation.get("recall", 0.0)),
                         precision=float(evaluation.get("precision", 0.0)),
-                        message="Entrainement manuel depuis l'interface Streamlit.",
+                        message="Entraînement manuel depuis l'interface Streamlit.",
                     )
-                st.success("Modele entraine et sauvegarde. Redemarre le collecteur pour charger ce modele.")
+                st.success("Modèle entraîné et sauvegardé. Redémarre le collecteur pour charger ce modèle.")
                 st.rerun()
             except Exception as exc:
                 record_ml_model_run(
@@ -1884,19 +1892,19 @@ def render_ml_analysis_tab(settings: AppConfig, node_names: List[str], selected_
                     status="error",
                     message=str(exc),
                 )
-                st.error(f"Echec entrainement ML: {exc}")
+                st.error(f"Échec entraînement ML : {exc}")
 
     st.divider()
-    render_section("Scores live", "Derniers scores Isolation Forest calcules par VM.")
+    render_section("Scores live", "Derniers scores Isolation Forest calculés par VM.")
     latest_scores = fetch_latest_ml_scores(settings.db_path, node=selected_node)
     if latest_scores:
         latest_frame = format_ml_scores_dataframe(latest_scores)
         st.dataframe(latest_frame, use_container_width=True, hide_index=True)
     else:
-        st.info("Aucun score ML persiste pour le moment. Le collecteur doit tourner avec ML_ENABLED=True.")
+        st.info("Aucun score ML persisté pour le moment. Le collecteur doit tourner avec ML_ENABLED=True.")
 
     filter_col1, filter_col2 = st.columns(2)
-    node_filter = filter_col1.selectbox("Noeud ML", options=["Tous", *node_names], index=node_names.index(selected_node) + 1 if selected_node in node_names else 0)
+    node_filter = filter_col1.selectbox("Nœud ML", options=["Tous", *node_names], index=node_names.index(selected_node) + 1 if selected_node in node_names else 0)
     vm_choices = {"Toutes": None}
     for vmid in sorted(vm_statuses):
         vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
@@ -1927,12 +1935,12 @@ def render_ml_analysis_tab(settings: AppConfig, node_names: List[str], selected_
 
 
 def render_ssh_events_tab(settings: AppConfig, node_names: List[str], vm_statuses: Dict[int, Dict[str, object]]) -> None:
-    render_section("Logs SSH / Syslog", "Evenements normalises recus depuis rsyslog ou le fallback SSH.")
+    render_section("Logs SSH / Syslog", "Événements normalisés reçus depuis rsyslog ou le fallback SSH.")
     if not settings.ssh_log_targets and not settings.syslog_vm_map:
-        st.info("Aucune source de logs configuree. Renseigne SYSLOG_VM_MAP ou SSH_LOG_TARGETS.")
+        st.info("Aucune source de logs configurée. Renseigne SYSLOG_VM_MAP ou SSH_LOG_TARGETS.")
 
     filter_col1, filter_col2 = st.columns(2)
-    node_filter = filter_col1.selectbox("Noeud logs", options=["Tous", *node_names])
+    node_filter = filter_col1.selectbox("Nœud logs", options=["Tous", *node_names])
     vm_choices = {"Toutes": None}
     for vmid in sorted(vm_statuses):
         vm_choices[f"{vmid} - {vm_statuses[vmid].get('name') or f'VM {vmid}'}"] = vmid
@@ -1946,7 +1954,7 @@ def render_ssh_events_tab(settings: AppConfig, node_names: List[str], vm_statuse
     )
     events_frame = format_ssh_events_dataframe(events)
     if events_frame.empty:
-        st.info("Aucun evenement SSH/Syslog collecte pour les filtres selectionnes.")
+        st.info("Aucun événement SSH/Syslog collecté pour les filtres sélectionnés.")
     else:
         st.dataframe(events_frame, use_container_width=True, hide_index=True)
 
@@ -1990,7 +1998,7 @@ navigation_options = [
     "Poste incident",
     "Incidents",
     "Supervision Proxmox",
-    "Reponse active",
+    "Réponse active",
     "Logs SSH / Syslog",
     "Analyse ML",
     "Audit",
@@ -2011,7 +2019,7 @@ render_theme_css(st.session_state["theme"])
 
 render_hero(
     "SOC Dashboard",
-    "Supervision Proxmox, detection comportementale explicable, incidents correles et reponse active human-in-the-loop.",
+    "Supervision Proxmox, détection comportementale explicable, incidents corrélés et réponse active human-in-the-loop.",
 )
 
 with st.sidebar:
@@ -2037,9 +2045,9 @@ except Exception as exc:
     settings_error = str(exc)
 
 if settings is None:
-    render_section("Configuration", "Le fichier .env doit etre valide avant de charger le dashboard.")
-    st.error(f"Configuration invalide: {settings_error}")
-    st.info("Complete le fichier .env avec des identifiants API valides pour afficher le dashboard.")
+    render_section("Configuration", "Le fichier .env doit être valide avant de charger le dashboard.")
+    st.error(f"Configuration invalide : {settings_error}")
+    st.info("Complète le fichier .env avec des identifiants API valides pour afficher le dashboard.")
     st.stop()
 
 proxmox, connection_error = get_connection(settings)
@@ -2048,18 +2056,18 @@ if not proxmox:
     if navigation == "Plateforme":
         render_platform_tab(settings, proxmox, connection_error, [], refresh_options)
     else:
-        st.error(f"Erreur de connexion a l'API Proxmox: {connection_error}")
-        st.info("La page Plateforme contient le detail de configuration et l'etat des services.")
+        st.error(f"Erreur de connexion à l'API Proxmox : {connection_error}")
+        st.info("La page Plateforme contient le détail de configuration et l'état des services.")
     st.stop()
 
 try:
     nodes = fetch_nodes(proxmox)
 except Exception as exc:
     if navigation == "Plateforme":
-        st.error(f"Impossible de recuperer les noeuds Proxmox: {exc}")
+        st.error(f"Impossible de récupérer les nœuds Proxmox : {exc}")
         render_platform_tab(settings, proxmox, connection_error, [], refresh_options)
     else:
-        st.error(f"Impossible de recuperer les noeuds Proxmox: {exc}")
+        st.error(f"Impossible de récupérer les nœuds Proxmox : {exc}")
     st.stop()
 
 node_names = [node["node"] for node in nodes if node.get("node")]
@@ -2067,7 +2075,7 @@ if not node_names:
     if navigation == "Plateforme":
         render_platform_tab(settings, proxmox, connection_error, [], refresh_options)
     else:
-        st.warning("Aucun noeud Proxmox n'a ete retourne par l'API.")
+        st.warning("Aucun nœud Proxmox n'a été retourné par l'API.")
     st.stop()
 
 if st.session_state.get("selected_node") not in node_names:
@@ -2085,7 +2093,7 @@ def render_dashboard() -> None:
         qemu_vms = fetch_qemu_vms(proxmox, selected_node)
         vm_statuses = fetch_vm_statuses(proxmox, selected_node, qemu_vms)
     except Exception as exc:
-        st.error(f"Impossible de charger les donnees du noeud {selected_node}: {exc}")
+        st.error(f"Impossible de charger les données du nœud {selected_node} : {exc}")
         return
 
     capture_node_history(settings, selected_node, node_status)
@@ -2115,7 +2123,7 @@ def render_dashboard() -> None:
         render_incidents_tab(settings, node_names, vm_statuses)
     elif navigation == "Supervision Proxmox":
         render_host_tab(settings, selected_node, node_status, vm_statuses, evaluation.current_alerts)
-    elif navigation == "Reponse active":
+    elif navigation == "Réponse active":
         render_response_tab(settings, proxmox, selected_node, vm_statuses)
     elif navigation == "Logs SSH / Syslog":
         render_ssh_events_tab(settings, node_names, vm_statuses)

@@ -100,7 +100,7 @@ class SyslogEventProcessor:
         if mapping is None:
             self.unmatched_events += 1
             warning = (
-                f"Evenement SSH ignore: aucune entree SYSLOG_VM_MAP pour "
+                f"Événement SSH ignoré : aucune entrée SYSLOG_VM_MAP pour "
                 f"remote={remote_ip} hostname={hostname or '-'}"
             )
             log(f"syslog warning | {warning}")
@@ -135,7 +135,7 @@ class SyslogEventProcessor:
             record_syslog_run(
                 self.settings.db_path,
                 status="success",
-                message="Evenement Syslog SSH insere.",
+                message="Événement Syslog SSH inséré.",
                 events_seen=self.events_seen,
                 events_inserted=self.events_inserted,
                 timestamp=collected_at,
@@ -203,7 +203,7 @@ def main() -> None:
             time.sleep(3600)
 
     if not settings.syslog_vm_map:
-        log("syslog warning | SYSLOG_VM_MAP est vide: les evenements seront ignores.")
+        log("syslog warning | SYSLOG_VM_MAP est vide : les événements seront ignorés.")
         record_syslog_run(settings.db_path, status="warning", message="SYSLOG_VM_MAP est vide.")
 
     processor = SyslogEventProcessor(settings)
@@ -222,7 +222,7 @@ def main() -> None:
     record_syslog_run(
         settings.db_path,
         status="listening",
-        message=f"Collecteur Syslog en ecoute sur {settings.syslog_bind_host}:{settings.syslog_port} ({protocols}).",
+        message=f"Collecteur Syslog en écoute sur {settings.syslog_bind_host}:{settings.syslog_port} ({protocols}).",
     )
 
     try:

@@ -36,16 +36,16 @@ def get_net0_state(proxmox, node_name: str, vmid: int) -> NetworkState:
         return NetworkState(
             isolated=None,
             label="net0 absent",
-            message=f"La VM {vmid} ne possede pas d'interface net0 configurable.",
+            message=f"La VM {vmid} ne possède pas d'interface net0 configurable.",
         )
 
     net0_config = parse_network_config(net0)
     is_isolated = net0_config.get("link_down") == "1"
-    status_label = "isole" if is_isolated else "connecte"
+    status_label = "isolé" if is_isolated else "connecté"
     return NetworkState(
         isolated=is_isolated,
         label=status_label,
-        message=f"Etat actuel de net0: {status_label}.",
+        message=f"État actuel de net0 : {status_label}.",
     )
 
 
@@ -54,22 +54,22 @@ def set_vm_network_state(proxmox, node_name: str, vmid: int, isolated: bool) -> 
     net0 = config.get("net0")
 
     if not net0:
-        return False, f"La VM {vmid} ne possede pas d'interface net0 configurable."
+        return False, f"La VM {vmid} ne possède pas d'interface net0 configurable."
 
     net0_config = parse_network_config(net0)
     current_state = net0_config.get("link_down") == "1"
 
     if isolated and current_state:
-        return True, f"La VM {vmid} est deja isolee sur net0."
+        return True, f"La VM {vmid} est déjà isolée sur net0."
     if not isolated and not current_state:
-        return True, f"Le reseau de la VM {vmid} est deja actif sur net0."
+        return True, f"Le réseau de la VM {vmid} est déjà actif sur net0."
 
     if isolated:
         net0_config["link_down"] = "1"
-        success_message = f"Isolation reseau appliquee a la VM {vmid} sur net0."
+        success_message = f"Isolation réseau appliquée à la VM {vmid} sur net0."
     else:
         net0_config.pop("link_down", None)
-        success_message = f"Reseau restaure pour la VM {vmid} sur net0."
+        success_message = f"Réseau restauré pour la VM {vmid} sur net0."
 
     updated_net0 = build_network_config(net0_config)
     proxmox.nodes(node_name).qemu(vmid).config.put(net0=updated_net0)

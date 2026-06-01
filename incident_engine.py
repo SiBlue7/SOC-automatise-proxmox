@@ -57,7 +57,7 @@ def incident_fields_for_alert(alert: AlertCandidate) -> Tuple[str, str, str, Opt
     if alert.scope == "host":
         return (
             "host_pressure",
-            f"Pression ressources sur noeud {alert.node}",
+            f"Pression ressources sur nœud {alert.node}",
             f"{alert.node}:host:resource_pressure:{bucket}",
             None,
             None,

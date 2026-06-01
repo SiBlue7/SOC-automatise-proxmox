@@ -149,7 +149,7 @@ def run_collection_cycle(
         return
 
     if not node_names:
-        message = "Aucun noeud retourne par l'API Proxmox."
+        message = "Aucun nœud retourné par l'API Proxmox."
         record_collector_run(
             settings.db_path,
             status="warning",
@@ -162,7 +162,7 @@ def run_collection_cycle(
         log(f"cycle warning | {message}")
         return
 
-    message = "Cycle de collecte termine."
+    message = "Cycle de collecte terminé."
     record_collector_run(
         settings.db_path,
         status="success",
@@ -291,7 +291,7 @@ def initialize_ml_model(settings: AppConfig):
             accuracy=float(evaluation.get("accuracy", 0.0)),
             recall=float(evaluation.get("recall", 0.0)),
             precision=float(evaluation.get("precision", 0.0)),
-            message="Auto-entrainement Isolation Forest au demarrage du collecteur.",
+            message="Auto-entraînement Isolation Forest au démarrage du collecteur.",
         )
         log(
             "ml model trained | "

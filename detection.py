@@ -50,7 +50,7 @@ def build_rules(settings: AppConfig) -> List[DetectionRule]:
             metric="cpu_percent",
             warn_threshold=settings.host_cpu_warn,
             critical_threshold=settings.host_cpu_critical,
-            description="Surcharge CPU du noeud Proxmox",
+            description="Surcharge CPU du nœud Proxmox",
         ),
         DetectionRule(
             rule_id="vm_cpu_pressure",
@@ -94,8 +94,8 @@ def metric_label(metric: str) -> str:
     labels = {
         "cpu_percent": "CPU",
         "ram_percent": "RAM",
-        "ssh_failed_count": "Echecs SSH",
-        "ssh_failed_count_source": "Echecs SSH par source",
+        "ssh_failed_count": "Échecs SSH",
+        "ssh_failed_count_source": "Échecs SSH par source",
         "ssh_source_count": "Sources SSH distinctes",
         "ssh_cpu_correlation": "Correlation SSH/CPU",
         "ssh_success_after_failures": "Succes SSH apres echecs",

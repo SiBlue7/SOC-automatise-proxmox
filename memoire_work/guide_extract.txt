@@ -1,0 +1,576 @@
+
+--- PAGE 1 ---
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+MODULE METHODOLOGIE DE 
+RECHERCHE : GUIDE DE COURS ET 
+LIVRABLE 
+ 
+MASTER 1 & 2 
+Masters informatiques (Data & IA, Cyber)  
+2025-2026 
+ 
+  
+
+--- PAGE 2 ---
+2 
+ 
+ 
+Table des matières 
+1. Introduction ..................................................................................................................................... 3 
+2. Objectifs et organisation du module ............................................................................................... 3 
+3. Modes d’évaluation ......................................................................................................................... 4 
+4. Démarche scientifique..................................................................................................................... 5 
+5. Constitution du livrable ................................................................................................................... 7 
+6. Plagiat et utilisation de l’Intelligence Artificielle Générative .......................................................... 9 
+7. Protocole de remise du livrable (Master 2) ................................................................................... 10 
+Annexes ................................................................................................................................................. 11 
+Annexe 1 – Critères d’évaluation du livrable et de la soutenance .................................................... 11 
+Annexe 2 - Format du livrable ........................................................................................................... 12 
+Annexe 3 - Attestation de non plagiat............................................................................................... 13 
+Annexe 4 - Normes bibliographiques ................................................................................................ 14 
+ 
+  
+
+--- PAGE 3 ---
+3 
+ 
+1. Introduction 
+ 
+Le module de méthodologie de la recherche en M1 et M2 a pour objectif de vous initier à la recherche 
+scientifique et de vous en enseigner les différentes étapes. Celle -ci vous exige de la rigueur, de la 
+méthode et de l'organisation.  
+- En M1, 20 heures de cours seront dispensées sur la démarche scientifique.  
+- En M2, 20 heures prévues dans votre emploi du temps, qui s eront consacrées à l’élaboration 
+de votre travail de recherche (dorénavant appelé livrable), en  présence de votre coach (sauf 
+pour le master 2 CCA).  
+Pour réaliser un bon travail de recherche, vous devrez choisir un sujet, trouver une problématique 
+pertinente, effectuer la récolte de données, analyser ces données et rédiger une synthèse qui est le 
+livrable en question.  
+C'est un travail exigeant,  effectué individuellement ou en binôme, qui demande de s'investir 
+pleinement. 
+Dans le cas où vous bénéficiez d’un aménagement (situation de handicap) vous pouvez, si vous le 
+souhaitez, le signaler auprès du coach.  
+2. Objectifs et organisation du module  
+ 
+Le module est divisé en deux années :  
+- MASTER 1 : Cours de méthodologie de recherche  
+Le cours de méthodologie de recherche vise à fournir des connaissances sur la méthodologie de 
+recherche, y compris l'analyse documentaire, la définition de la problématique, les méthodes de 
+collecte et d’analyse des données quantitatives et qualitatives. 
+Il s’agit également de vous former à la rédaction d’un travail de recherche.  
+Volume : 20 heures 
+Masters Informatiques (Data & IA, Cyber) :   
+- Problématique, revue de la littérature et cahier de charge  
+- La méthodologie de récolte et d’analyse des données scientifiques en informatique repose 
+sur la programmation, l’expérimentation, la simulation  et la collecte automatique de 
+données depuis des systèmes informatique s, en veillant à la qualité et la pertinence des 
+données recueillies. L’analyse des données utilise des méthodes statistiques, 
+algorithmiques et de visualisation pour extraire , interpréter les résultats, valider des 
+modèles et générer des conclusions.  
+ 
+Pour plus d’informations sur le cours de méthodologie de recherche voire fiche de cours disponible 
+sur agora et icampus. Chaque enseignant mettra à votre disposition tous les documents nécessaires 
+à l'apprentissage des différentes étapes de la recherche. 
+ 
+
+--- PAGE 4 ---
+4 
+ 
+- MASTER 2 : Suivi du travail de recherche  
+20 heures de cours avec votre coach seront dédiées à l’élaboration du livrable et de votre poster. 
+Durant ces 20 heures vous êtes invité à :  
+- Avancer dans la rédaction de votre livrable et la conception de votre poster  en suivant la 
+démarche scientifique ci-dessous (voire section 4) ; 
+- Préparer chaque séance en amont afin de poser des questions pertinentes à votre coach. 
+Sachez que le coach est là pour vous guider  tout au long des différe ntes étapes (voire section 4 ). 
+Cependant, vous devez être autonome et responsable de la réflexion et rédaction de votre livrable. 
+Le coach n’est pas dans l’obligation de relire votre travail avant l’échéance du rendu final et en dehors 
+des heures de coaching. 
+Le livrable et le poster doivent être finalisés en dehors de ces 20 heures, si nécessaire.  
+3. Modes d’évaluation 
+ 
+MASTER 1 
+Les évaluations prévues pour le cours de méthodologie de recherche sont les suivantes :  
+- Masters Informatiques (Data & IA, Cyber) :  revue de la littérature + projet adapté au 
+contexte scientifique.  
+Les enseignants vous donneront des instructions (format, date, etc.) plus précises pendant le cours et 
+les documents nécessaires seront disponibles sur iCampus.  
+La note finale du cours sera la moyenne de ces évaluations.  
+MASTER 2 
+Vous devez, comme indiqué précédemment, rédiger un livrable qui fera l’objet de votre évaluat ion. 
+L’évaluation est divisée en :  
+- Livrable écrit : 40 % 
+- Soutenance : Poster et exposé (incluant démo) : 60 % 
+La date de remise du livrable de mémoire vous sera communiquée sur iCampus.  
+Les critères d’évaluation sont présentés dans l’annexe 1.  
+Important :  
+L’enseignement «  introduction à la méthodologie  de recherche » , en semestre 4 du M2, est 
+considéré comme un contrôle continu. Il donnera lieu à 2 notes  : une note pour le livrable (i.e. le 
+mémoire) et une note pour la soutenance orale. Un étudiant ne rendant pas son livrable d’initiation 
+à la recherche du M2 à la date indiquée aura une note de 00/20. La matière ne sera validée que si la 
+moyenne des 2 notes est supérieure ou égale à 10/20. 
+ 
+ 
+ 
+
+--- PAGE 5 ---
+5 
+ 
+ 
+4. Démarche scientifique  
+ 
+Un travail de recherche suit un processus : 
+ 
+ETAPE 1 - CHOISIR UN SUJET 
+Un sujet de recherche est d’abord une question d’intérêt personnel. Il y a trois possibilités pour choisir 
+un sujet : 
+- Le sujet est en lien avec la thématique de votre master et de votre cursus de master ; 
+- Le sujet est en lien avec votre projet professionnel et/ou avec votre alternance (cela peut 
+vous aider à le définir, à préciser vos réflexions, évaluer la faisabilité de ce projet, etc…) ; 
+- Le sujet vous tient à cœur, même s’il est déconnecté de votre cursus. 
+ 
+Choisir un sujet en lien avec la thématique de votre Master, de votre projet professionnel ou de votre 
+alternance est un réel atout pour votre CV et peut être mis en avant dans vos candidatures.  
+Un questionnaire vous sera envoyé le 15 janvier par mail par votre RP ou coach pour indiquer votre 
+sujet et binôme (si c’est le cas). Vous devez répondre à ce questionnaire pour le 15 février au plus tard. 
+Aucun changement de sujet et de binôme ne sera accepté après le 15 février. 
+ 
+ETAPE 2 - DEFINIR LE CADRE THEORIQUE ET LA PROBLEMATIQUE  
+Cette partie demande un intense travail de documentation. L’objectif de vos lectures est de vous 
+approprier le sujet que vous avez choisi afin de dégager des orientations qu’il serait utile d’approfondir. 
+Le travail de documentation vous permet de rédiger la revue de la littérature, ce que l’on appelle aussi 
+un « état de l’art », qui précise le cadre théorique dans lequel s’insère votre recherche.  
+Ainsi le but de l’état de l’art n’est pas de faire une liste de résumés des articles lus mais de réaliser un 
+état des lieux  précis des connaissances actuelles sur votre sujet, aboutissant à la définition d’une  
+problématique. L'état de l'art n'est pas non plus une collection de citations d'auteurs. 
+Définir une problématique, c’est énoncer u ne question précise sur le sujet choisi au préalable. Votre 
+recherche doit apporter quelque chose de neuf.   
+Succinctement, vous devez :  
+- Identifier, définir et analyser les concepts et modèles théoriques exploités dans des autres 
+travaux scientifiques ; 
+- Faire émerger un questionnement sur le sujet (problématique).  
+ 
+ETAPE 3 - CHOISIR UNE METHODOLOGIE DE RECHERCHE ET REALISER LA COLLECTE DE DONNEES 
+Parmi les méthodes couramment utilisé es en recherche on trouve  : réalisation d’expériences, 
+administration d’enquêtes ou de sondages, réalisation d’entretiens, observations, focus group… etc.  
+
+--- PAGE 6 ---
+6 
+ 
+La méthodologie est fonction des objectifs de l’étude. Il importe de bien réfléchir à la méthode à 
+employer et au mode d’utilisation, notamment dans l’analyse des données qui en sera faite (Etape 4). 
+L’objectif est de s’appuyer sur des éléments pertinents dont l’analyse permettra de répondre aux 
+questions de recherches posées et/ou hypothèses. 
+Masters Informatiques (Data & IA, Cyber) :  
+Dans la recherche scientifique en informatique, à titre d'exemple, la collecte des données et la 
+réalisation des taches évoquées dans le cahier de charge consistent à réunir des données numériques 
+issues d'expériences, d'observations et d'études de cas. Ainsi, les tâches à accomplir peuven t être 
+exploitées avec une approche statistique et/ou algorithmique. 
+Nous attendons une réelle validation des taches permettant l’obtention des résultats attendus.   
+Vous pouvez discuter de votre choix de méthode avec votre coach. 
+Succinctement, vous devez :  
+- Choisir la méthodologie de recherche et les méthodes de collecte de données qui 
+correspondent le mieux à votre problématique ; 
+- Collecter les données.  
+ 
+ETAPE 4 - ANALYSER ET INTERPRETER LES RESULTATS 
+L'objectif de cette phase est de traiter les données collectées afin d'en tirer des interprétations et des 
+conclusions. Il s'agit de segmenter, classer, regrouper, comparer, etc. chaque donnée collectée. 
+En plus, l'analyse des données consiste à identifier, parmi les données recueillies, celles qui sont 
+significatives selon les objectifs de la recherche et à établir des relations entre elles.  
+Le choix de la méthod ologie de recherche (étape 3) doit se faire en connaissant les modes d’analyse 
+envisagés afin que le protocole à suivre soit cohérent.  
+L'interprétation ou la discussion correspond à la réflexion que l'on mène sur ses résultats en fonction 
+de l'hypothèse ou des questions de recherche. Elle consiste à donner un sens particulier aux résultats 
+qui ont été observés dans la recherche. Vous pouvez souligner dans cette partie :  
+- Les nouveaux éléments spécifiques à votre recherche ; 
+- Les éléments déjà observés dans des recherches antérieures et à comparer a vec les 
+vôtres ; 
+- La signification théorique et pratique des résultats ; 
+- Les éléments intéressants à approfondir dans des recherches futures. 
+Succinctement, vous devez :  
+- Choisir la méthode d’analyse des données ; 
+- Analyser les données collectées ; 
+- Interpréter les résultats obtenus à partir des données collectées.  
+ 
+ETAPE 5 – REDIGER LE LIVRABLE 
+Outre la rédaction de la revue de la littérature, qui sert à définir le cadre théorique de votre sujet et 
+débouche sur votre problématique de recherche, la rédaction implique de présenter votre 
+
+--- PAGE 7 ---
+7 
+ 
+méthodologie de manière claire et précise, les résultats pertinents (qui sont utiles pour répondre à la 
+question initiale), de les discuter avec la bibliographie existante et enfin de conclure. 
+Là encore, il ne s'agit pas d'une étape à prendre à la légère. Il y a des règles de structure (voir partie 5 
+ci-dessous) à respecter et vous devez vous rappeler que le document de recherche est la principale 
+production que les lecteurs auront pour comprendre votre approche, l'intérêt et l'originalité de votre 
+recherche. 
+ 
+ 
+5. Constitution du livrable  
+ 
+Le livrable est un travail de recherche  concis, de 25 pages maximum hors page de couverture, 
+attestation plagiat, sommaire, résumé, bibliographie et annexes. 
+Le livrable doit respecter le format comme décrit dans l’annexe 2.  
+Le livrable doit respecter une structure et un plan précis : 
+Page de couverture  
+Mentionner le titre du travail de recherche , le nom de l’étudiant, le cursus et l’année 
+universitaire. 
+Ajouter le logo de l’EDN (disponible sur iCampus).  
+Ne pas inclure les logos de l’entreprise, ou des autres images.  
+Si les données collectées sont confidentielles, vous devez ajouter la mention "CONFIDENTIEL" 
+sur la page de couverture. Cependant, vous devez d'abord informer votre coach des raisons de 
+la confidentialité et obtenir son accord pour ajouter la mention "confidentiel". 
+ 
+Attestation de non-Plagiat  
+ Inclure dans votre livrable l’attestation de plagiat que vous trouverez en annexe 3.  
+ 
+Sommaire 
+La construction du sommaire peut permettre de vérifier la cohérence du plan  : la lecture des 
+titres des différentes parties doit donner un aperçu du déroulement de la démonstration et 
+l’enchainement doit apparaître cohérent. Il est obligatoire de créer un sommaire automatique 
+et paginé.  
+Résumé  
+Résumé en français et en anglais de 250 mots environ, permettant de comprendre clairement 
+ce que vous avez étudié, quelles méthodes vous avez utilisées et quels résultats vous avez 
+obtenus. 
+ 
+Mot clés 
+Inclure quatre à cinq mots-clés.  
+ 
+Introduction 
+L’introduction permet au lecteur de comprendre votre recherche de manière globale. Vous 
+devez y :  
+- Présenter le sujet et définir les principaux termes ; 
+
+--- PAGE 8 ---
+8 
+ 
+- Présenter votre cadre théorique ; 
+- Introduire la problématique de votre recherche ; 
+- Présenter votre méthodologie de recherche ; 
+- Mentionner l’objectif principal de votre recherche ; 
+- Annoncer le plan de votre livrable.  
+ 
+Revue de la Littérature et Définition de la Problématique  
+La revue de la littérature correspond à l’état de l’art qui décrit ce que l’on connait du sujet choisi.  
+Comme mentionné  précédemment, vous devez y montrer vos connaissances des principaux 
+concepts, théories, données et chiffres clés, les perspectives des différents auteurs, etc.  
+Il doit y être fait mention régulièrement de la bibliographie utilisée qui est mise en forme selon 
+les règles présentées en cours et rappelées succinctement en annexe 4. Nous vous proposons 
+de suivre le système (auteur-date). C’est-à-dire que, dans le texte, la citation ne comprend que 
+le nom des auteurs et l’année de publication. Si vous avez plus de 2 auteurs alors vous n’indiquez 
+que le nom du premier auteur suivi de et al. (du latin et alii signifiant et autres). Par contre, dans 
+la partie bibliographie, toutes les indications doivent être données (Cf. Annexe 4). 
+ 
+Nous attendons un minimum de 15 références scientifiques.  
+ 
+La partie définition de la problématique est une partie courte qui découle de l’état de l’art et qui 
+est souvent considérée comme une fin d’introduction (il n’est pas forcément utile d’en faire une 
+partie bien distincte). Il s’agit de présenter la problématique de votre recherche.  
+Méthodologie  
+Cette partie, plutôt technique, demande de la rigueur. Il s’agit de présenter le plus précisément 
+possible la méthodologie de récolte de données que vous avez choisie. Le lecteur doit être 
+capable, en lisant cette partie, de reproduire à l’identique votre récolte de données. 
+Résultats 
+Il s’agit de présenter les résultats pertinents pour  répondre à la problématique . Dans cette 
+partie, vous pouvez présenter les résultats de vos codes d’une manière visuelle en utilisant des 
+figures ou des tableaux de comparaison. Chacun de ces éléments doit comporter une légende, 
+être numéroté et la référence doit se trouver de manière explicite dans le texte. 
+Discussion  
+L’objectif de cette partie est de reprendre les résultats  pertinents, de les confronter avec la 
+littérature afin de pouvoir définir quels sont les apports scientifiques de votre recherche par 
+rapport aux travaux passés. 
+Attention, ce n’est pas une partie où on apporte de nouveaux résultats. On utilise les résultats 
+présentés dans la partie précédente. 
+Conclusion  
+C’est une partie relativement courte qui reprend succinctement la problématique et les 
+hypothèses afin de conclure à leur sujet.  
+Dans cette section, vous pouvez également mentionner les limites de votre recherche et 
+réfléchir aux perspectives de recherche futures. 
+ 
+ 
+
+--- PAGE 9 ---
+9 
+ 
+Bibliographie 
+La bibliographie comporte la liste par ordre alphabétique des références citées dans le texte 
+et seulement celles citées dans le texte. Vous aurez surement lu beaucoup plus de documents 
+que ceux mentionnés et utilisés pour la rédaction de votre travail de recherche. Vous devez 
+vérifier la bonne correspondance entre les ouvrages cités dans votre bibliographie et ceux cités 
+dans votre texte.  
+Le référencement des sources bibliographiques dans le texte puis dans la partie bibliographie en 
+fin du document doivent répondre à des règles spécifiques. Il est conseillé d’utiliser l a norme 
+APA (American Psychological Association) . Cette norme vous ser a expliquée en cours et est 
+rappelée brièvement en annexe 5. 
+Cependant, vous pouvez également utiliser les normes IEEE, Chicago et Oxford. Le plus 
+important est de choisir l’une des normes mentionnées et de l'utiliser de manière cohérente 
+dans tout le document.  
+ 
+Il est obligatoire dans votre bibliographie de préciser en dessous de chaque article scientifique 
+le DOI.  
+ 
+Annexes  
+Les annexes sont des documents complémentaires à la lecture et à la compréhension de votre 
+travail de recherche, ou des sources qui garantissent l’authenticité de vos recherches (guid e 
+entretien et/ou questionnaire utilisé, protocole suivi, etc…). Il est obligatoire de joindre dans 
+vos annexes : 
+- Dans le cas où vous avez choisi une approche qualitative  :  les guides d’entretiens et la 
+transcription des entretiens ;  
+- Dans le cas où vous avez choisi une approche quantitative : le questionnaire utilisé et la 
+base de données quantitatives. 
+Vous pouvez également joindre les prompts que vous avez éventuellement utilisés dans le 
+cadre de votre travail. 
+ 
+6. Plagiat et utilisation de l’Intelligence Artificielle Générative 
+ 
+Comme indiqué dans le règlement des études Masters de la FGES : « Plagier c’est tricher ! »  
+ 
+Il existe plusieurs formes de plagiat :   
+- Plagiat directe : copier le travail d’une autre personne (y compris des sites Internet) en 
+totalité ou en partie sans citer les auteurs  ; copier la structure du travail d’un autre 
+auteur ; 
+- Plagiat « copier-coller » : Copier des passages de l’œuvre d’autrui ou ses idées, sans  en 
+citer la source, pour créer un nouveau texte ; 
+- Auto-plagiat : Copier votre propre œuvre ou des parties de votre propre œuvre pour un 
+nouveau travail ;  
+Vous n’avez pas le droit d’utiliser un travail déjà évalué et qui a servi à valider un cours 
+et/ou un diplôme précédent. 
+- Paraphraser sans citer la source : réécrire des idées d’autrui sans les citer correctement.  
+ 
+
+--- PAGE 10 ---
+10 
+ 
+Vous devez également éviter les citations excessives dans votre livrable. L'objectif est que vous 
+analysiez les différentes informations et données de manière cohérente et concise.  
+ 
+L’intégrité intellectuelle est une valeur importante à la faculté. Le plagiat est un problème préoccupant 
+du fait de la facilité du « copier -coller » et  de la non -perception par bon nombre d’étudiants de la 
+gravité de la fraude. C’est pourquoi les plagiaires sont sévèrement punis. 
+Les sanctions possibles sont les suivantes :   
+- Commission d’instruction ;  
+- Conseil disciplinaire ; 
+- Les sanctions applicables en cas de plagiat peuvent aller jusqu’à l’exclusion pour 5 ans 
+du système universitaire français. 
+ 
+En plus, tout contenu généré par des outils d'intelligence artificielle (IA) tels que Chat-GPT ou DALL-
+E (ou autres) ne peut être considéré comme votre propre travail.  
+ 
+Il est indiqué dans le règlement des études de l’ICL -ESR dans sa partie commune  : « Les étudiants 
+veilleront à utiliser l’IA dans le cadre d’exercice strictement pédagogique et non pour réaliser un travail 
+donnant lieu à une évaluation ». 
+ 
+Pour lutter cont re la tentation du plagiat, tout travail de recherche  doit être rendu en version 
+numérique, afin d’être contrôlé par un logiciel anti-plagiat. 
+7. Protocole de remise du livrable (Master 2)  
+ 
+Le protocole de dépôt de votre livrable de mémoire est le suivant :  
+ 
+- Sauvegarder le document en format PDF  et le nommer avec votre NOM / Prénom et 
+MASTER. Exemple, RAMOS Sandra M2 DICO ; 
+- Déposer votre document sur i Campus dans le dossier  de votre master «  Livrable de 
+Recherche ». 
+ 
+Un seul exemplaire est nécessaire par binôme. 
+La date de remise de votre livrable de mémoire sera précisée sur iCampus. 
+Assurez-vous que vous avez bien soumis le document sur iCampus.  
+
+--- PAGE 11 ---
+11 
+ 
+Annexes  
+Annexe 1 – Critères d’évaluation du livrable et de la soutenance 
+Pour l’évaluation du livrable, la grille suivante sera appliquée : 
+ 
+  
+Note Barême
+/1
+/2
+/1
+#VALEUR! /4
+Note Barême
+/3
+/2
+/3
+/2
+/3
+/3
+#VALEUR! /16
+#VALEUR! /20
+Appréciation sur le livrable :
+#VALEUR!
+#REF!
+#VALEUR!
+ 
+Insuffisant
+Faible
+Passable
+Assez bien
+Bien
+Très bien
+Excellent
+ELEMENTS DE FORME
+ELEMENTS DE FOND
+Orthographe, grammaire, respect de la mise en forme du document
+Clarté du texte, cohérence entre les différentes parties et qualité de 
+rédaction 
+Sujet maîtrisé mais pas ou peu approfondi. Règles d'élaboration 
+respectées dans l'ensemble.
+Respect des normes de présentation et conformité de la bibliographie 
+(nombre et qualité des références)
+Note sur la forme
+Note sur le fond
+Qualité de l'état de l'art théorique (Compréhension de la littérature et 
+des travaux dans le domaine d’études concerné)
+NOTE LIVRABLE
+Formulation pertinente de la problématique
+Capacité analytique et de réflexion, rigueur de l'argumentation
+Adéquation de la méthodologie avec la question de recherche, 
+justification et présentation de la méthodologie suivie
+18 à 20
+ entre 0 et 6
+entre 14 et 16
+16 à 17
+entre 7 et 9
+Notes correspondantes
+Sujet est  bien maîtrisé et approfondi, les règles d'élaboration de l'étude 
+sont respectées.
+Recherche remarquable, réel potentiel en recherche
+Recherche exceptionnelle
+entre 10 et 11
+entre 12 et 13
+Sujet peu abordé, non maitrisé, problématique présentée mais non 
+traitée, respect aléatoire des règles d'élaboration de l'étude. 
+Qualité et quantité* de l'analyse des données                                 
+* respect des normes minimales fixées dans le guide
+Pertinence de la discussion des résultats 
+Sujet non-traité, absence de problématique, non respect des règles 
+d'élaboration.
+Qualité du travail
+Sujet abordé mais non maîtrisé, problématique mal traitée, respect 
+aléatoire des règles d'élaboration de l'étude.
+NOTE LIVRABLE (40%)
+NOTE SOUTENANCE (60%)
+Note finale :
+GRILLE D'EVALUATION DU LIVRABLE D'INITIATION A LA RECHERCHE
+Grille d'évaluation du livrable
+Nom et prénom de l'étudiant :
+Cursus : 
+Nom et prénom du Jury 1 :
+Date de soutenance :
+Nom et prénom de l'étudiant :
+Nom et prénom du Jury 2 :
+(Nom et prénom du Jury 3 :)
+
+--- PAGE 12 ---
+12 
+ 
+ 
+ 
+Annexe 2 - Format du livrable  
+ 
+Votre livrable doit être formaté comme suit :  
+• Format : Digital en format Word ou PDF. Le texte doit être justifié (aligné). 
+Si une version papier est demandée par vos évaluateurs alors, préférez une impression recto-
+verso.  
+• Rédaction du texte : 
+o Police : Taille 12 Times new Roman ; Taille 11 Calibri 
+o Interligne : 1,5 
+o Marges : 3 cm à gauche et à droite 
+• Police des sections 
+o 1er niveau : 13 gras, petites majuscules 
+o 2ème niveau : 12 gras 
+o 3ème niveau : 12 italique 
+• Tableaux et figures 
+o Contenu : Police 9 
+o Titre :  Police 9, Gras, centré et numéroté (Tableau1, 2… et Figure 1, 2…) 
+o Source : Indiquez en italique sous le tableau sa source s’il n’est pas de votre fait 
+o Référence : Dans le corps du texte, évoquez par leur numéro des tableaux et figures 
+que vous évoquez (cf. Tab. 1, 2… ou cf. Fig. 1, 2…) 
+• Numéros de page 
+o En bas au centre ou en bas à droite 
+ 
+ 
+PAGE de COUVERTURE 
+La page de couverture de votre livrable doit comporter : 
+Le logo de l’EDN (les logos sont disponibles sur iCampus) ; 
+Le titre de votre travail de recherche ; 
+Votre nom, l’intitulé de votre master et l’année de la soutenance. 
+ 
+ 
+
+--- PAGE 13 ---
+13 
+ 
+Annexe 3 - Attestation de non plagiat  
+ 
+ 
+ATTESTATION DE NON-PLAGIAT 
+ 
+Je soussigné, « Nom et Prénom  », étudiant à la FGES, durant l’année universitaire « 202 4/2025 » 
+certifie que le(a) présent e livrable du travail de recherche  « titre du document », est strictement le 
+fruit de mon travail personnel, de synthèse et d’analyse.  
+ 
+Toute citation (articles, livres, mémoires, documents d’entreprises, sources Internet, …) est 
+formellement notée comme telle, explicitée et référencée dans le corps du texte et en bibliographie.  
+Tout tableau ou modèle (photos et illustrations diverses) est dûment cité s’il est emprunté à un auteur 
+ou cité en source s’il est adapté.  
+ 
+Tout manquement à cette Charte de non -plagiat entraînera la suspension de l’évaluation du livrable, 
+une notation égale à 0, et la convocation devant le conseil de discipline de l’école.  
+ 
+Fait, à ______ le ________ 
+ 
+Signature 
+____________________________ 
+
+--- PAGE 14 ---
+ 
+14 
+ 
+Annexe 4 - Normes bibliographiques 
+ 
+L’ensemble précis des informations est donné en cours. Il ne s’agit ici que d’un court aide-mémoire. 
+Vous pouvez citer vos sources dans le texte de deux façons : soit en évoquant le nom de l’auteur dans 
+le texte, suivi de l’année de publication entre parenthèse ; soit en mettant entre parenthèses le nom 
+de l’auteur et l’année, séparée d’une virgule.  Il faut ajouter le numéro de page lorsque vous citez de 
+manière exacte les propos de l’auteur. 
+Exemples : 
+Ex 1 : Becker actualise les prémisses de Beccaria (1764) et de Be ntham (1789), à l’aide d’une 
+théorie utilitariste formalisée du comportement criminel.  
+Ex 2 : « Recherche fondamentale et recherche appliquée s’inscrivent toutes deux dans un jeu 
+de contraintes et de marge de manœuvre » (Alami et al., 2024, p.20).  
+Il n’est pas utile de mettre la référence bibliographique complète en note de bas de page à chaque 
+citation. En revanche, to utes les références doivent apparaître dans la bibliographie, en classant les 
+auteurs par ordre alphabétique. 
+Par exemple : 
+Pour citer un ouvrage : 
+Buchanan J. (1969), Cost and Choice, Midway Reprint, the University of Chicago Press (p. 43). 
+Pour citer un article : 
+Harrant V. (2002), The Price of Impending Death: Evidence from  Compensation awarded to Victims  
+contaminated by AIDS in France, Journal of Legal Economics, n° 12(1), pp. 53-81. 
+Malaury P. (2003), Le handicap de l’enfant : un droit désemparé, La semaine juridique, n° 7, pp. 285 -
+288. 
+Vous devez ajouter le DOI pour chaque article scientifique. 
+Pour citer un article extrait d’un ouvrage collectif : 
+Schelling T.C. (1968), “The life you save may be your own”, in Chase S.B. (eds.), Problems in public 
+expenditure Analysis, Washington, DC, Brookings Institution. 
+ 
+Vous pouvez moduler la présentation de ces exemples, mais la mise en forme doit être cohérente pour 
+toute la bibliographie. Regardez simplement comment sont construites les bibliographies des articles 
+que vous lisez. 
+Pour plus de détails, vous pouvez consulter la page suivante: 
+https://www.compilatio.net/blog/normes-apa 
+ 
+ 

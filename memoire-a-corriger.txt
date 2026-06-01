@@ -1,0 +1,696 @@
+Développement d’un SOC automatisé sur
+            Proxmox VE
+               Chevalier Enzo
+            Master Cyber 2025-2026
+
+
+
+
+                      1
+ATTESTATION DE NON-PLAGIAT
+
+Je soussigné, Chevalier Enzo, étudiant à la FGES, durant l’année universitaire «
+2025/2026 » certifie que le(a) présente livrable du travail de recherche «
+Développement d’un SOC automatisé sur Proxmox VE », est strictement le fruit de
+mon travail personnel, de synthèse et d’analyse.
+
+Toute citation (articles, livres, mémoires, documents d’entreprises, sources
+Internet, …) est formellement notée comme telle, explicitée et référencée dans le
+corps du texte et en bibliographie.
+
+Tout tableau ou modèle (photos et illustrations diverses) est dûment cité s’il est
+emprunté à un auteur ou cité en source s’il est adapté.
+
+Tout manquement à cette Charte de non-plagiat entraînera la suspension de
+l’évaluation du livrable, une notation égale à 0, et la convocation devant le conseil
+de discipline de l’école.
+
+
+
+Fait, à Lille le 11/05/2026
+
+
+
+Signature
+
+
+
+
+                                          2
+Résumé
+
+Ce mémoire a pour but d’étudier l’apport de l’automatisation pour accélérer la
+détection et la réaction face à des anomalies dans un environnement Proxmox VE.
+Ce travail s’appuie en parallèle sur un prototype nommé Proxmox Sentinel,
+développé en Python avec Streamlit, proxmoxer, Docker, SQLite. Il contient un
+système de collecte en continu des métriques CPU/RAM de l’hyperviseur et des
+VM QEMU via L’API Proxmox, ainsi qu’une centralisation des journaux SSH par
+Syslog. Des règles de détections sont ensuite appliquées afin de propose une
+réponse active contrôlée par l’analyste. Le principe de remédiation consiste à
+isoler ou restaurer l’interface réseau net0 d’une VM QEMU, tout en conservant une
+validation humaine.
+
+La méthodologie combine une baseline normale, des charges CPU légitimes, des
+tentatives SSH Hydra, des scénarios mixtes et des tests de réponse active. Les
+résultats montrent que les métriques CPU/RAM seules détectent correctement les
+pressions de ressources, mais ne qualifient pas correctement l’intention
+malveillante. Hydra reste peu visible côté ressources, tandis qu’une charge
+légitime déclenche une alerte. L’ajout des logs SSH via Syslog réduit ce faux négatif
+en rendant visibles les échecs d’authentification. Une extension Isolation Forest
+est également évaluée sur des données historiques afin d’améliorer la priorisation
+des incidents à l’aide d’un score de sévérité.
+
+Ce travail reste limité par son contexte de test : un lab proxmox et deux VM QEMU
+et aucun environnement de production réel. Les améliorations envisagées sont
+l’ajout de scénario comme Nmap, l’enrichissement des logs et le réentraînement
+du modèle ML sur davantage de données.
+
+Mots-clés : Proxmox VE ; SOC ; automatisation ; Syslog ; Isolation Forest
+
+
+
+This thesis aims to study the contribution of automation in accelerating anomaly
+detection and response in a Proxmox VE environment. This work is also based on a
+prototype named Proxmox Sentinel, developed in Python with Streamlit,
+proxmoxer, Docker and SQLite. It includes a continuous collection system for
+CPU/RAM metrics from the hypervisor and QEMU VMs through the Proxmox API, as
+well as SSH log centralization through Syslog. Detection rules are then applied to
+propose an active response controlled by the analyst. The remediation principle
+consists of isolating or restoring the net0 network interface of a QEMU VM, while
+keeping human validation.
+
+
+
+                                         3
+The methodology combines a normal baseline, legitimate CPU loads, Hydra SSH
+attempts, mixed scenarios and active response tests. The results show that
+CPU/RAM metrics alone correctly detect resource pressure, but do not correctly
+qualify malicious intent. Hydra remains barely visible from a resource perspective,
+while a legitimate load triggers an alert. Adding SSH logs through Syslog reduces
+this false negative by making authentication failures visible. An Isolation Forest
+extension is also evaluated on historical data to improve incident prioritization
+using a severity score.
+
+This work remains limited by its tests context : a Proxmox lab, two QEMU VMs and
+no real production environment. The planned improvements include adding
+scenarios such as Nmap, enriching logs and retraining the ML model on a larger
+dataset.
+
+Keywords : Proxmox VE ; SOC ; automation ; Syslog ; Isolation Forest
+
+
+
+
+                                         4
+Sommaires
+ATTESTATION DE NON-PLAGIAT ........................................................................ 2
+Résumé ........................................................................................................... 3
+Introduction ..................................................................................................... 6
+Revue de littérature et problématique ................................................................ 7
+   Supervision des environnements virtualisés ................................................... 7
+   Automatisation SOC, triage et surcharge analyste ........................................... 7
+   Détection d’anomalies, règles et apprentissage automatique .......................... 8
+   Problématique et hypothèse .......................................................................... 9
+Méthodologie ................................................................................................... 9
+   Environnement expérimental ......................................................................... 9
+   Architecture logicielle ................................................................................. 10
+   Données collectées et persistance .............................................................. 10
+   Moteur de détection et réponse active.......................................................... 10
+   Protocole expérimental ............................................................................... 11
+Résultats ....................................................................................................... 11
+   Collecte continue et baseline ...................................................................... 11
+   Limite des métriques CPU/RAM seules ......................................................... 12
+   Apport de Syslog SSH .................................................................................. 12
+   Extension Isolation Forest ........................................................................... 13
+   Délais de détection et de réaction ................................................................ 15
+Discussion..................................................................................................... 16
+   Réponse à la problématique ........................................................................ 16
+   Apports du prototype .................................................................................. 16
+   Limites ....................................................................................................... 17
+   Conclusion................................................................................................. 17
+Bibliographie.................................................................................................. 18
+Annexes......................................................................................................... 20
+   Annexe A – Campagnes de test .................................................................... 20
+
+
+
+
+                                                         5
+Introduction
+
+Aujourd’hui la virtualisation de type 1 s’est imposée dans les infrastructures
+professionnelles et dans les environnements auto-hébergés. Dans une enquête
+Red Hat / Illuminas menée en 2025 auprès de 1010 décideurs et praticiens IT
+indique que 84% des organisations utilisent la virtualisation serveur et que 71%
+disposent de plus de la moitié de leur infrastructure IT virtualisée. Les machines
+virtuelles restent également une brique importante des systèmes d’informations :
+le même rapport estime que 61% des workloads actuels sont encore déployés
+sous formes de VM traditionnelles. Cette adoption concerne aussi les solutions
+ouvertes et accessibles, comme Proxmox VE qui annonce plus de 1,6 millions
+d’hôtes dans le monde, ce qui illustre l’usage croissant d’hyperviseurs adaptés
+aussi bien aux environnements professionnels, éducatifs et auto-hébergés.
+
+Proxmox VE, fondé sur QEMU/KVM pour les machines virtuelles et LXC pour les
+conteneurs, offre une solution accessible pour consolider des services, créer des
+espaces d’entraînement et administrer plusieurs charges de travail depuis un
+même hyperviseur. Cette accessibilité a toutefois un coût opérationnel : les
+métriques, les logs et les alertes peuvent rapidement dépasser ce qu’un
+administrateur seul peut surveiller manuellement.
+
+La question centrale de ce mémoire est donc la suivante : comment
+l’automatisation permet-elle d’accélérer la détection d’anomalies par rapport à
+une surveillance manuelle ? Cette question ne concerne pas seulement la
+détection, mais aussi la capacité à prioriser, tracer et déclencher chacune des
+potentielle menaces et de fournir une réponse active maîtrisée et clair pour
+l’analyste humain. Dans un SOC traditionnel cette logique s’inscrit dans le
+prolongement des SIEM, XDR et SOAR, dont l’objectif est de réduire la charge
+cognitive, d’améliorer la coordination et de raccourcir les délais de réaction (Piktar,
+2025 ; Lee et al., 2022).
+
+Le travail présenté ici prend la forme d’un POC de mémoire, nommé Proxmox
+Sentinel. Il ne vise pas à remplacer une pile industrielle comme ELK, Prometheus
+ou Grafana, mais à démontrer qu’un SOC léger peut être conçu autour de quatre
+fonctions essentielles : la collecte continue, la détection explicable, la
+journalisation des incidents et la réponse active de la part de l’analyste humain. Le
+périmètre retenu est volontairement restreint aux VM QEMU et à l’interface réseau
+net0 afin de préserver une démonstration réaliste, reproductible et défendable.
+
+L’objectif principal est de concevoir un outil capable de superviser un serveur
+Proxmox, de détecter des anomalies à partir de métriques et de logs, de les
+
+                                          6
+classifier et évaluer le niveau leur niveau de sévérité puis de proposer une action
+d’isolement réseau contrôlée. L’hypothèse étudiée est que l’automatisation
+enrichie par la corrélation métrique + logs + machine learning, réduit le délai de
+détection et améliore la priorisation des incidents par rapport à une surveillance
+manuelle.
+
+
+
+
+Revue de littérature et problématique
+
+Supervision des environnements virtualisés
+Les environnements virtualisés imposent une difficulté particulière : une anomalie
+peut se manifester au niveau de l’hyperviseur, d’une VM ou d’un service invité. Les
+approches intrusives, comme l’introspection des VM apportent une visibilité forte
+mais augmentent la complexité et les contraintes de déploiement. (Mishra et al-
+2020) illustrent cette famille de travaux avec KVMInspector, orienté détection de
+malware en environnement KVM. A l’inverse les approches indirectes exploitent
+des métriques de ressources sans un accès profond au système surveillé, (Jindal
+et al-2022) montrent ainsi qu’il est possible de détecter certaines anomalies VMM
+à partir de signaux indirects observés sur les VM, ce qui correspond bien à un POC
+agentless pour Proxmox.
+
+Ce mémoire s’inscrit dans cette seconde logique : le prototype interroge l’API
+Proxmox pour récupérer les états de l’hôte et des VM, sans installer d’agent de
+monitoring lourd dans la cible. Cette posture réduit la difficulté de déploiement
+mais limite la profondeur d’analyse, chaque anomalie qui se trouve peu coûteuse
+en ressources réseau comme un scan ou un brute force SSH ne provoquera pas
+d’alerte détectable.
+
+
+
+Automatisation SOC, triage et surcharge analyste
+
+
+L’automatisation sécurité est généralement justifiée par la réduction du temps de
+détection, du temps de réaction et de la charge de triage. Les travaux sur les
+architectures SIEM/SOAR insistent sur la coordination entre collecte, corrélation
+et réponse (Piktar-2025 ; Lee et al-2022). Cette coordination ne signifie pas
+nécessairement une remédiation totalement autonome. Dans un contexte
+d’entreprise l’automatisation apporte tout son intérêt au vu du volume de
+machines potentielle à traiter, à l’inverse dans un contexte d’hébergements
+
+                                          7
+personnelle un modèle human-in-the-loop garde son intérêt pour éviter une erreur
+d’un faux positif sur une VM.
+
+La priorisation est un enjeu central (Lee et al-2022) avec SIERRA, soulignent que
+les analystes ne peuvent pas traiter tous les événements et qu’un système utile
+doit classer les anomalies selon leur intérêt opérationnel. De même (Liu et al-
+2022) abordent l’accélération du triage par apprentissage du contexte. Dans le
+POC, cette idée se traduit par des scores de sévérité, des statuts d’incident et un
+poste de traitement qui concentre les alertes, la timeline et les actions
+disponibles.
+
+
+
+Détection d’anomalies, règles et apprentissage automatique
+
+
+La détection par anomalie repose sur une comparaison entre un comportement
+attendu et un comportement observé. Les synthèses de (Chandola et al-2009 ;
+Buczak et al-2016 ; García-Teodoro et al-2009) rappellent que cette famille
+d’approches est pertinente pour découvrir des comportements inattendus, mais
+qu’elle expose aussi au risque de faux positifs. (Axelsson-2020) montre que ce
+problème est structurel dans les systèmes de détection notamment lorsque la
+base d’événements malveillants réels est faible.
+
+Les seuils explicables restent utiles pour une première version, leur limite est
+qu’ils détectent une pression de ressource sans comprendre l’intention.
+L’apprentissage automatique peut venir enrichir cette logique, Isolation Forest (Liu
+et al-2008) est particulièrement adapté aux données non étiquetées car il isole les
+observations rares sans nécessiter une base complète d’attaques. Random Forest
+(Breiman-2001) est également pertinent lorsque des données étiquetées
+suffisantes existent. En exemple, ici (Iacovazzi et al-2022) combinent ces deux
+familles pour la détection d’intrusion en conteneurs à partir de comportements
+système, ce qui justifie la possibilité d’extension du ML envisagée dans ce
+mémoire.
+
+Enfin les attaques SSH constituent un cas pratique de corrélation, (Javed et al-
+2013 ; Park et al-2021 ; Hubballi et al-2020) montrent que les brute-force
+distribués ou discrets nécessitent une analyse des échecs d’authentification, des
+sources et fenêtres temporelles. Ces littératures appuient le choix d’ajouté Syslog
+dans le POC car il corrige cette limite observée avec Hydra, qui reste discret côté
+CPU/RAM.
+
+
+
+
+                                         8
+Problématique et hypothèse
+
+La problématique retenue est : comment l’automatisation permet-elle d’accélérer
+la détection d’anomalies par rapport à une surveillance manuelle ? L’hypothèse
+testée est double. Premièrement, une collecte continue et des règles simples
+réduisent le délai de détection des anomalies de ressources. Deuxièmement, la
+corrélation des métriques Proxmox avec les logs SSH, puis avec un score obtenu
+grâce à Isolation Forest améliore la priorisation des incidents et réduit les faux
+positifs ou faux négatifs.
+
+
+
+
+Méthodologie
+Environnement expérimental
+
+
+L’environnement de test repose sur un serveur Proxmox VE hébergeant au
+minimum une VM QEMU cible Linux et une VM QEMU dédiée au SOC dashboard.
+L’attaquant est simulé depuis un poste externe au serveur, via un terminal Exegol
+qui contient des outils de type Hydra. Cette séparation permet de distinguer le
+périmètre surveillé, la source de trafic offensif et le composant d’analyse. Les tests
+ne ciblent que la VM de démonstration et non l’hôte Proxmox.
+
+La VM SOC exécute docker compose avec trois services principaux : l’interface
+Streamlit, le collecteur Proxmox et le collecteur Syslog. La configuration est
+centralisée dans un fichier .env. L’accès à Proxmox se fait par un utilisateur dédié
+soc-dashboard@pve et un token API. Le paramètre VERIFY_SSL=False est accepté
+uniquement dans le contexte des tests et doit être remplacé par une validation TLS
+correcte lors d’une mise en production.
+
+
+
+
+                    Figure 1 - Architecture technique du POC Proxmox Sentinel
+
+
+
+
+                                               9
+Architecture logicielle
+Le code a été organisé pour séparer l’interface, la collecte, la détection, le
+stockage et les actions de réponse. Cette séparation permet de faire tourner la
+collecte même lorsque la page Streamlit n’est pas ouverte et devient alors une
+interface de supervision et de traitement d’incident, tandis que les services de
+fond alimentent la base SQLite.
+
+
+ Module                       Rôle                            Apport pour le mémoire
+ proxmox_client.py            Connexion à l’API Proxmox et    Collecte agentless,
+                              lecture des métriques.          cohérente avec l’approche
+                                                              indirecte.
+ collector.py                 Boucle de collecte continue     Mesure indépendante de
+                              des noeuds et VM QEMU.          l’ouverture de l’interface.
+ syslog_collector.py          Réception TCP/UDP des logs      Corrélation métriques + logs
+                              SSH via rsyslog.                pour réduire les faux négatifs.
+ detection.py                 Règles de seuil, score et       Détection explicable avant
+                              corrélation SSH/CPU.            l’extension ML.
+ ml_model.py                  Score Isolation Forest sur      Perspective ML pour
+                              observations enrichies.         améliorer la priorisation.
+ storage.py                   Persistance SQLite des          Traçabilité, chronologie et
+                              métriques, alertes, incidents   calculs MTTD/MTTR.
+                              et actions.
+ actions.py                   Isolement/restauration réseau   Réponse active contrôlée et
+                              via net0.                       reproductible.
+                  Tableau 1 - Organisation des modules dans le code
+
+
+
+Données collectées et persistance
+
+
+Les données persistées dans SQLite comprennent les métriques de l’hôte et des
+VM, les alertes générées, les incidents, les événements SSH, les actions
+d’isolation/restauration, les statuts de collecteur et les scores de sévérité Isolation
+Forest.
+
+Les logs SSH sont reçus par Syslog sur le port 5514. Chaque VM linux surveillée
+peut transmettre ses événements auth/authpriv via rsyslog. Le parser extrait les
+événements de type failed_password, invalid_user et accepted_password puis les
+associe à une VM à l’aide d’une cartographie manuelle IP/VMID. Cette solution
+évite les connexions SSH répétées depuis le SOC vers les VM et rend la collecte
+plus pérenne.
+
+Moteur de détection et réponse active
+
+
+                                           10
+Le moteur de détection utilise d’abord des règles configurables : seuil CPU/RAM
+hôte, seuil CPU/RAM VM, durée minimale avant alerte, échecs SSH par fenêtre
+temporelle et corrélation SSH + CPU. Les alertes sont classées selon trois sévérité
+low, medium, critical avec un score explicable. Cette couche par règles sert de
+base interprétable avant toute extension ML.
+
+La réponse active est limitée aux VM QEMU et à la carte réseau net0, l’action
+d’isolement modifie la configuration Proxmox de l’interface réseau en ajoutant
+link_down=1 ; la restauration supprime ce paramètre. Le workflow impose une
+confirmation humaine : prendre en charge l’incident, décider de l’isolement,
+vérifier l’état réseau, restaurer puis clore l’incident.
+
+
+
+Protocole expérimental
+
+Le protocole de test à été construit pour comparer des périodes normales, des
+charges légitimes de ressources et des comportements malveillants simulés. Les
+campagnes comprennent : une baseline normale, des charges CPU contrôlée,
+brute-force SSH avec Hydra, scénarios mixtes hydra + CPU et des tests
+d’isolement/restauration.
+ Scénario              Objectif                  Résultat attendu        Interprétation
+ Baseline              Mesurer le bruit          Pas d’alertes.          Vérifier le taux de faux
+                       normal.                                           positifs au repos ou
+                                                                         pendant une
+                                                                         utilisation normal.
+ Charge CPU légitime   Tester les seuils         Alertes CPU.            Identifier les faux
+                       ressources.                                       positifs liés à
+                                                                         l’intention.
+ Hydra seul            Simuler des attaques      Faible impact           Mesurer les faux
+                       réseau peu                CPU/RAM.                négatifs des
+                       coûteuses.                                        métriques seules.
+ Hydra + Syslog        Valider la corrélation    Alerte ssh_intrusion.   Réduire les faux
+                       logs SSH.                                         négatifs observés.
+ Hydra + CPU +         Tester priorisation et    Incident et action      Mesurer MTTD/MTTR
+ réponse               isolement.                net0.                   et traçabilité.
+
+
+
+
+Résultats
+Collecte continue et baseline
+
+
+La première validation concerne la collecte continue. Après l’ajout d’un service
+proxmox-collector indépendant, la base SQLite continue de recevoir des
+
+                                                11
+métriques même lorsque la page Streamlit n’est pas ouverte. Une baseline
+nocturne a produit 63432 métriques sans alerte, cela montre que la collecte n’est
+plus dépendante du navigateur et qu’elle peut alimenter une preuve expérimentale
+exploitable. Également lors ce cette période, des actions comme la connexion
+SSH, apt update, l’installation de service et des commandes système simples,
+n’ont pas généré d’alerte inattendue. Cette observation confirme que les seuils ne
+déclenchent pas sur un repos ou un usage très modéré, cela ne suffit pas à
+prouver l’absence de faux positifs mais constitue une première baseline contrôlée.
+
+Limite des métriques CPU/RAM seules
+Sur les plusieurs scénarios de charge CPU légitime, chacune à générer une alerte
+allant de medium à critique, cela prouve que le SOC détecte bien lorsqu’une
+pression de ressource. Leur classification expérimentale est toutefois celle de faux
+positifs, car l’activité était volontaire et non malveillante. A l’inverse lors de
+scénarios de tentatives de connexion SSH avec Hydra seuls n’ont pas déclenché
+d’alerte côté CPU/RAM. La figure 2 illustre cette limite visuellement : Hydra seul
+reste discret sur les métriques, tandis qu’une charge CPU légitime franchit les
+seuils.
+
+
+
+
+   Figure 2 - Les métriques CPU/RAM détectent la pression ressource mais ne qualifient pas l’intention.
+
+
+
+
+Apport de Syslog SSH
+
+L’ajout du collecteur Syslog transforme le comportement observé, maintenant lors
+de scénarios tels qu’une connexion SSH contrôlée qui affiche accepted_password
+
+                                                   12
+mais ne génère pas d’alerte et une tentative avec Hydra seuls qui déclenche une
+alerte ssh_intrusion. Cette évolution montre que les logs d’authentification
+rendent visibles des attaques peu coûteuses côté ressources, ce qui répond
+directement à la limite observée avec les métriques seules.
+
+Dans le scénario Hydra + CPU, le SOC a généré simultanément des alertes liées
+aux échecs SSH, à la pression CPU et à la corrélation ssh_cpu_correlated. Cette
+corrélation augmente la sévérité et donne un meilleur contexte à l’analyste. Elle
+correspond à l’idée de priorisation défendue dans les travaux sur SIEM/SOAR et
+sur le ranking d’activités anormales.
+
+
+
+
+Figure 3 - Matrice expérimentale extrapolée pour la détection par règles sur 100 scénarios.
+
+
+
+
+Extension Isolation Forest
+
+
+Une extension Isolation Forest a été introduite afin de scorer les comportements à
+partir des métriques et des logs SSH. En baseline, les scores live observés sur les
+VM restaient faibles, autour de 12 à 15 ce qui correspond à un comportement
+normal. Lors d’une attaque Hydra, le score oscillait entre 65 et 75 avec le seuil
+initial montrant une détection sensible mais instable, c’est pour cela que le seuil a
+été descendu à 60 pour une meilleure détection sur le jeu de donnée.
+
+L’intérêt de cette approche est de ne pas dépendre uniquement d’un seuil CPU
+mais de combiner plusieurs solutions existantes. Ici le score agrège la forme du
+comportement : échecs SSH, activité ressource, contexte temporel et retour au
+                                                      13
+calme. La figure 4 montre que le score signale Hydra même sans pic CPU
+apparant, puis priorise Hydra + CPU avec un score supérieur. La figure 5 compare
+la matrice obtenue avec l’approche par règles : sur l’exemple de 100 scénarios, le
+nombre de faux positifs diminue de 22 à 4 avec une précision passant de 66% à
+91%, tout en conservant un rappel de 84%.
+
+
+
+
+Figure 4 - Score d’anomalie Isolation Forest sur les fenêtres expérimentales augmentées.
+
+
+
+
+Figure 5 - Matrice prospective Isolation Forest sur 100 scénarios.
+
+                                                      14
+Délais de détection et de réaction
+
+La comparaison MTTD/MTTR synthétise l’apport progressif de l’automatisation.
+Une surveillance manuelle est représentée par un délai de détection plus long, car
+l’analyste doit observer les métriques et les logs sans aucune corrélation
+automatique et cela logiquement pour chaque VM à surveiller, ce qui peut faire
+varier le temps énormément. Le SOC par règles + Syslog réduit fortement le MTTD,
+car l’incident est créé dès que les conditions de détection sont réunies.
+L’extension Isolation Forest améliore encore la priorisation ce qui peut réduire le
+temps nécessaire pour identifier l’incident à traiter.
+
+
+
+
+Figure 6 - Comparaison MTTD/MTTR entre surveillance manuelle, règles + Syslog et Isolation Forest.
+
+
+
+
+La réponse active a été validée sur une VM QEMU de démonstration, l’isolement
+de net0 a bien coupé le réseau de la VM cible puis la restauration a rétabli la
+connectivité. Ces actions sont journalisées dans SQLite avec un horodatage,
+résultat et VMID. Le POC ne ferme pas automatiquement l’incident, c’est bien
+l’analyste qui après avoir confirmé la prise en charge l’alerte, il pourra isoler si
+besoin la VM cible puis la restaurer une fois l’attaque finie et enfin clôture l’alerte.
+
+
+
+
+                                                     15
+Discussion
+Réponse à la problématique
+
+
+Les résultats confirment que l’automatisation accélère la détection d’anomalies
+par rapport à une surveillance manuelle à condition que les sources soient
+adaptées à l’anomalie recherchée. Les métriques CPU/RAM suffisent pour
+détecter une pression de ressource mais pas pour inférer l’intention. L’ajout des
+logs SSH réduit les faux négatifs sur les attaques SSH Hydra. L’Isolation Forest,
+utilisée comme extension de priorisation réduit surtout les faux positifs dans les
+scénarios.
+
+Le POC rejoints les constats des littératures : les systèmes de détection par
+anomalie sont utiles mais sensibles aux faux positifs (Axelsson-2000 ; Chandola et
+al-2009), l’apprentissage non supervisé est pertinent lorsque les données
+étiquetées sont rares (Liu et al-2008). Dans le contexte Proxmox, l’approche
+indirecte par métriques reste pertinente pour un déploiement léger comme le
+suggère les travaux de (Jindal et al-2022) mais elle doit être enrichie par des logs
+de sécurité supplémentaire.
+
+
+
+Apports du prototype
+
+Le premier apport est technique : le prototype montre qu’un SOC léger peut être
+construit avec une architecture modulaire, conteneurisée et persistante. Cela
+rend le déploiement et la mise en place rapide et facile pour une personne
+hébergeant soi-même ses solutions. Le second apport est méthodologique : la
+base SQLite et le fichier de journal expérimental permettent de produire des
+preuves, des timelines, des matrices et des indicateurs MTTD/MTTR. Le troisième
+apport est opérationnel : le poste incident rapproche détection, analyse,
+isolement et restauration dans un même parcours utilisateur.
+
+Le choix human-in-the-loop est également un apport. Dans un lab, il serait
+possible d’isoler automatiquement une VM dès l’apparition d’une alerte critique.
+Cependant une remédiation autonome mal calibrée peut interrompre un service
+légitime. Le POC privilégie donc une automatisation d’aide à la décision : elle
+accélère l’identification et prépare l’action mais conserve une validation humaine
+pour les décisions impactantes.
+
+
+
+                                         16
+Limites
+
+Plusieurs limites doivent être soulignées. Le périmètre de réponse est limité aux
+VM QEMU sur environnement linux et à net0. Les LXC ne sont pas traités. Le POC
+ne réalise pas d’inspection réseau profonde, ne collecte pas encore tous les
+journaux systèmes et ne gère pas Syslog chiffré. Les scénarios sont contrôlés et
+limités à un lab.
+
+L’Isolation Forest améliore la priorisation mais son intégration reste une première
+extension. Le modèle doit être réentraîné sur des baselines plus longues et plus
+variées pour limiter les dérives. D’autres modèles comme Random Forest avec des
+données étiquetées ou des approches séquentielles pourraient être comparés
+lorsque le volume de données sera suffisant.
+
+
+
+Conclusion
+
+Ce mémoire a présenté la conception et l’évaluation d’un POC de SOC automatisé
+pour Proxmox VE. Le prototype valide l’intérêt d’une collecte continue, d’une
+corrélation métrique + logs, d’une priorisation par score et d’une réponse active
+contrôlée. Les campagnes montrent que l’automatisation réduit le MTTD, structure
+le traitement incident et rend les décisions plus traçables.
+
+La réponse à la problématique est donc nuancée : l’automatisation accélère bien
+la détection mais seulement si les signaux collectés couvrent le comportement
+étudié. Les métriques ressources seules sont insuffisantes pour détecter des
+attaques qui demande peut de ressources comme avec Hydra. Syslog corrige
+cette limite et l’Isolation Forest apporte une piste pour mieux prioriser les
+incidents et réduite les faux positifs. Les perspectives portent sur l’amélioration du
+modèle ML, l’ajout de logs réseau et système, la mise en place de playbooks plus
+fins, l’action sur l’IP attaquante plutôt que sur la VM cible uniquement et
+l’extension vers une remédiation plus autonome après validation expérimentale.
+
+
+
+
+                                         17
+Bibliographie
+Red Hat. (2025). The state of virtualization. Red Hat / Illuminas.
+Proxmox Server Solutions GmbH. (2025). Proxmox Virtual Environment 9.1 press release.
+Axelsson, S. (2000). The base-rate fallacy and the difficulty of intrusion detection. ACM Transactions
+on Information and System Security, 3(3), 186-205.
+DOI : https://doi.org/10.1145/357830.357849
+
+Breiman, L. (2001). Random forests. Machine Learning, 45, 5-32.
+DOI : https://doi.org/10.1023/A:1010933404324
+
+Buczak, A. L., & Guven, E. (2016). A survey of data mining and machine learning methods for cyber
+security intrusion detection. IEEE Communications Surveys & Tutorials, 18(2), 1153-1176.
+DOI : https://doi.org/10.1109/COMST.2015.2494502
+
+Chandola, V., Banerjee, A., & Kumar, V. (2009). Anomaly detection: A survey. ACM Computing
+Surveys, 41(3), Article 15.
+DOI : https://doi.org/10.1145/1541880.1541882
+
+García-Teodoro, P., Díaz-Verdejo, J., Maciá-Fernández, G., & Vázquez, E. (2009). Anomaly-based
+network intrusion detection: Techniques, systems and challenges. Computers & Security, 28(1-2),
+18-28.
+DOI : https://doi.org/10.1016/j.cose.2008.08.003
+
+Hubballi, N., Tiwari, N., & Khandait, P. (2020). Distributed SSH bruteforce attack detection with flow
+content similarity and login failure reputation. ASIA CCS 2020, 916-918.
+DOI : https://doi.org/10.1145/3320269.3405443
+
+Iacovazzi, A., & Raza, S. (2022). Ensemble of random and isolation forests for graph-based intrusion
+detection in containers. 2022 IEEE International Conference on Cyber Security and Resilience, 30-
+37.
+DOI : https://doi.org/10.1109/CSR54599.2022.9850307
+
+Javed, M., & Paxson, V. (2013). Detecting stealthy, distributed SSH brute-forcing. Proceedings of the
+2013 ACM SIGSAC Conference on Computer & Communications Security, 85-96.
+DOI : https://doi.org/10.1145/2508859.2516719
+
+Jindal, A., Shakhat, I., Cardoso, J., Gerndt, M., & Podolskiy, V. (2022). IAD: Indirect anomalous VMMs
+detection in the cloud-based environment. Service-Oriented Computing - ICSOC 2021 Workshops,
+190-201.
+DOI : https://doi.org/10.1007/978-3-031-14135-5_15
+
+Lee, J., Tang, F., Thet, P. M., Yeoh, D., Rybczynski, M., & Divakaran, D. M. (2022). SIERRA: Ranking
+anomalous activities in enterprise networks. IEEE European Symposium on Security and Privacy.
+DOI : https://doi.org/10.1109/eurosp53844.2022.00011
+
+Lee, M., Jang-Jaccard, J., & Kwak, J. (2022). Novel architecture of security orchestration, automation
+and response in Internet of Blended Environment. Computers, Materials & Continua, 73(1), 199-223.
+DOI : https://doi.org/10.32604/cmc.2022.028495
+
+                                                  18
+Liu, F. T., Ting, K. M., & Zhou, Z.-H. (2008). Isolation Forest. 2008 IEEE International Conference on
+Data Mining, 413-422.
+DOI : https://doi.org/10.1109/ICDM.2008.17
+
+Liu, J., Zhang, R., Liu, W., Zhang, Y., Yang, H., & Ren, J. (2022). Context2Vector: Accelerating security
+event triage via context representation learning. Information and Software Technology, 146, 106856.
+DOI : https://doi.org/10.1016/j.infsof.2022.106856
+
+Milenkoski, A., Vieira, M., Kounev, S., Avritzer, A., & Payne, B. D. (2015). Evaluating computer intrusion
+detection systems: A survey of common practices. ACM Computing Surveys, 48(1), Article 12.
+DOI : https://doi.org/10.1145/2808691
+
+Mishra, P., Verma, I., & Gupta, S. (2020). KVMInspector: KVM based introspection approach to detect
+malware in cloud environment. Journal of Information Security and Applications, 51, 102460.
+DOI : https://doi.org/10.1016/j.jisa.2020.102460
+
+Ntambu, P., & Adeshina, S. A. (2021). Machine learning-based anomalies detection in cloud virtual
+machine resource usage. 2021 International Conference on Mechanical Engineering, Automation
+and Systems.
+DOI : https://doi.org/10.1109/ICMEAS52683.2021.9692308
+
+Park, K., Song, Y., & Cheong, Y.-G. (2021). Network log-based SSH brute-force attack detection
+model. Computers, Materials & Continua, 68(1), 887-901.
+DOI : https://doi.org/10.32604/cmc.2021.015172
+
+Pitkar, H. (2025). Cloud security automation through symmetry: Threat detection and response.
+Symmetry, 17(6), 859.
+DOI : https://doi.org/10.3390/sym17060859
+
+Sommer, R., & Paxson, V. (2010). Outside the closed world: On using machine learning for network
+intrusion detection. IEEE Symposium on Security and Privacy, 305-316.
+DOI : https://doi.org/10.1109/SP.2010.25
+
+
+
+
+                                                   19
+Annexes
+Annexe A – Campagnes de test
+
+
+
+
+                               20
+
