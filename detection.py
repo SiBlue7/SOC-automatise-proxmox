@@ -197,20 +197,25 @@ def evaluate_ssh_signals(
     active_breaches: Dict[str, datetime],
     fired_alert_keys: Set[str],
     detected_at: datetime,
+    cpu_pressure_vmids: Optional[Set[int]] = None,
 ) -> DetectionEvaluation:
     current_alerts: List[AlertCandidate] = []
     new_alerts: List[AlertCandidate] = []
     active_keys: Set[str] = set()
+    correlated_vmids: Set[int] = set()
+    cpu_pressure_vmids = cpu_pressure_vmids or set()
 
     for vmid, failure_count in ssh_failure_counts.items():
         vm_status = vm_statuses.get(vmid, {"name": f"VM {vmid}", "cpu": 0.0})
         target_name = str(vm_status.get("name") or f"VM {vmid}")
         cpu_percent = float(vm_status.get("cpu", 0.0)) * 100
+        has_cpu_pressure = vmid in cpu_pressure_vmids or cpu_percent >= settings.ssh_correlation_cpu_threshold
 
         correlated_key = f"{node_name}:{vmid}:ssh_cpu_correlated"
         brute_force_key = f"{node_name}:{vmid}:ssh_bruteforce_suspected"
 
-        if failure_count >= settings.ssh_auth_failure_warn and cpu_percent >= settings.ssh_correlation_cpu_threshold:
+        if failure_count >= settings.ssh_auth_failure_warn and has_cpu_pressure:
+            correlated_vmids.add(vmid)
             active_since = active_breaches.setdefault(correlated_key, detected_at)
             severity = "critical" if failure_count >= settings.ssh_auth_failure_critical else "medium"
             score = 95 if severity == "critical" else 82
@@ -225,8 +230,8 @@ def evaluate_ssh_signals(
                 severity=severity,
                 score=score,
                 message=(
-                    f"Correlation suspecte: {failure_count} echecs SSH recents "
-                    f"et CPU VM a {cpu_percent:.2f}%"
+                    f"Corrélation suspecte : {failure_count} échecs SSH récents "
+                    f"et pression CPU active"
                 ),
                 active_since=active_since,
                 detected_at=detected_at,
@@ -240,7 +245,7 @@ def evaluate_ssh_signals(
             active_breaches.pop(correlated_key, None)
             fired_alert_keys.discard(correlated_key)
 
-        if failure_count >= settings.ssh_auth_failure_warn:
+        if failure_count >= settings.ssh_auth_failure_warn and vmid not in correlated_vmids:
             active_since = active_breaches.setdefault(brute_force_key, detected_at)
             severity = "critical" if failure_count >= settings.ssh_auth_failure_critical else "medium"
             score = min(100, 60 + int((failure_count / settings.ssh_auth_failure_critical) * 35))
@@ -254,7 +259,7 @@ def evaluate_ssh_signals(
                 threshold=settings.ssh_auth_failure_warn,
                 severity=severity,
                 score=score,
-                message=f"Brute-force SSH probable: {failure_count} echecs SSH recents",
+                message=f"Brute-force SSH probable : {failure_count} échecs SSH récents",
                 active_since=active_since,
                 detected_at=detected_at,
             )
@@ -269,11 +274,15 @@ def evaluate_ssh_signals(
 
     if ssh_source_failure_counts:
         for (vmid, source_ip), failure_count in ssh_source_failure_counts.items():
+            alert_key = f"{node_name}:{vmid}:ssh_bruteforce_source:{source_ip}"
+            if vmid in correlated_vmids:
+                active_breaches.pop(alert_key, None)
+                fired_alert_keys.discard(alert_key)
+                continue
             if failure_count < settings.ssh_source_failure_warn:
                 continue
             vm_status = vm_statuses.get(vmid, {"name": f"VM {vmid}"})
             target_name = str(vm_status.get("name") or f"VM {vmid}")
-            alert_key = f"{node_name}:{vmid}:ssh_bruteforce_source:{source_ip}"
             active_since = active_breaches.setdefault(alert_key, detected_at)
             severity = "critical" if failure_count >= settings.ssh_auth_failure_critical else "medium"
             score = min(100, 68 + int((failure_count / settings.ssh_auth_failure_critical) * 27))
@@ -287,7 +296,7 @@ def evaluate_ssh_signals(
                 threshold=settings.ssh_source_failure_warn,
                 severity=severity,
                 score=score,
-                message=f"Brute-force SSH probable depuis {source_ip}: {failure_count} echecs recents",
+                message=f"Brute-force SSH probable depuis {source_ip} : {failure_count} échecs récents",
                 active_since=active_since,
                 detected_at=detected_at,
             )
@@ -301,11 +310,15 @@ def evaluate_ssh_signals(
         for vmid, counters in ssh_distributed_counts.items():
             source_count = int(counters.get("source_count", 0))
             failure_count = int(counters.get("failure_count", 0))
+            alert_key = f"{node_name}:{vmid}:ssh_bruteforce_distributed"
+            if vmid in correlated_vmids:
+                active_breaches.pop(alert_key, None)
+                fired_alert_keys.discard(alert_key)
+                continue
             if source_count < settings.ssh_distributed_source_warn or failure_count < settings.ssh_auth_failure_warn:
                 continue
             vm_status = vm_statuses.get(vmid, {"name": f"VM {vmid}"})
             target_name = str(vm_status.get("name") or f"VM {vmid}")
-            alert_key = f"{node_name}:{vmid}:ssh_bruteforce_distributed"
             active_since = active_breaches.setdefault(alert_key, detected_at)
             severity = "critical" if failure_count >= settings.ssh_auth_failure_critical else "medium"
             score = min(100, 72 + (source_count * 4) + int((failure_count / settings.ssh_auth_failure_critical) * 16))
@@ -320,7 +333,7 @@ def evaluate_ssh_signals(
                 severity=severity,
                 score=score,
                 message=(
-                    f"Brute-force SSH distribue probable: {failure_count} echecs "
+                    f"Brute-force SSH distribué probable : {failure_count} échecs "
                     f"depuis {source_count} sources"
                 ),
                 active_since=active_since,
@@ -338,11 +351,15 @@ def evaluate_ssh_signals(
             source_ip = str(signal.get("source_ip") or "unknown")
             username = str(signal.get("username") or "unknown")
             failure_count = int(signal.get("failure_count", 0))
+            alert_key = f"{node_name}:{vmid}:ssh_success_after_failures:{source_ip}:{username}"
+            if vmid in correlated_vmids:
+                active_breaches.pop(alert_key, None)
+                fired_alert_keys.discard(alert_key)
+                continue
             if failure_count < settings.ssh_success_after_failure_warn:
                 continue
             vm_status = vm_statuses.get(vmid, {"name": f"VM {vmid}"})
             target_name = str(vm_status.get("name") or f"VM {vmid}")
-            alert_key = f"{node_name}:{vmid}:ssh_success_after_failures:{source_ip}:{username}"
             active_since = active_breaches.setdefault(alert_key, detected_at)
             alert = build_signal_alert(
                 node_name=node_name,
@@ -355,7 +372,7 @@ def evaluate_ssh_signals(
                 severity="critical",
                 score=98,
                 message=(
-                    f"Connexion SSH reussie apres {failure_count} echecs "
+                    f"Connexion SSH réussie après {failure_count} échecs "
                     f"pour {username} depuis {source_ip}"
                 ),
                 active_since=active_since,
@@ -388,6 +405,7 @@ def evaluate_detection(
     current_alerts: List[AlertCandidate] = []
     new_alerts: List[AlertCandidate] = []
     active_keys: Set[str] = set()
+    cpu_pressure_vmids: Set[int] = set()
 
     targets = []
     targets.append(("host", None, node_name, node_status))
@@ -402,6 +420,8 @@ def evaluate_detection(
             value = get_metric_value(rule, target)
             key_vmid = "host" if vmid is None else str(vmid)
             alert_key = f"{node_name}:{key_vmid}:{rule.rule_id}"
+            if rule.rule_id == "vm_cpu_pressure" and vmid is not None and value >= rule.warn_threshold:
+                cpu_pressure_vmids.add(vmid)
 
             if value < rule.warn_threshold:
                 active_breaches.pop(alert_key, None)
@@ -442,7 +462,25 @@ def evaluate_detection(
             active_breaches,
             fired_alert_keys,
             detected_at,
+            cpu_pressure_vmids=cpu_pressure_vmids,
         )
+        correlated_vmids = {
+            alert.vmid
+            for alert in ssh_evaluation.current_alerts
+            if alert.event_type == "ssh_cpu_correlated" and alert.vmid is not None
+        }
+        if correlated_vmids:
+            suppressed_resource_keys = {f"{node_name}:{vmid}:vm_cpu_pressure" for vmid in correlated_vmids}
+            current_alerts = [
+                alert for alert in current_alerts if alert.alert_key not in suppressed_resource_keys
+            ]
+            new_alerts = [
+                alert for alert in new_alerts if alert.alert_key not in suppressed_resource_keys
+            ]
+            for alert_key in suppressed_resource_keys:
+                active_keys.discard(alert_key)
+                active_breaches.pop(alert_key, None)
+                fired_alert_keys.discard(alert_key)
         current_alerts.extend(ssh_evaluation.current_alerts)
         new_alerts.extend(ssh_evaluation.new_alerts)
         active_keys.update(ssh_evaluation.active_keys)

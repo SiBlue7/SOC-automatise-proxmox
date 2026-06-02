@@ -116,6 +116,20 @@ def run_collection_cycle(
                 sample_time,
                 ml_bundle,
             )
+            correlated_vmids = {
+                alert.vmid
+                for alert in evaluation.current_alerts
+                if alert.event_type == "ssh_cpu_correlated" and alert.vmid is not None
+            }
+            if correlated_vmids:
+                filtered_ml_alerts = []
+                for alert in ml_alerts:
+                    if alert.vmid in correlated_vmids:
+                        active_breaches.pop(alert.alert_key, None)
+                        fired_alert_keys.discard(alert.alert_key)
+                        continue
+                    filtered_ml_alerts.append(alert)
+                ml_alerts = filtered_ml_alerts
             active_keys = set(evaluation.active_keys)
             active_keys.update(alert.alert_key for alert in ml_alerts)
             for alert in evaluation.current_alerts:
