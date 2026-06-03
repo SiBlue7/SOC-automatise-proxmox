@@ -111,6 +111,11 @@ SEVERITY_LABELS = {
     "low": "Faible",
 }
 
+HISTORY_COLUMN_ALIASES = {
+    "RAM utilisee (GiB)": "RAM utilisée (GiB)",
+    "SWAP utilisee (GiB)": "SWAP utilisée (GiB)",
+}
+
 STATUS_TONE = {
     "open": "danger",
     "acknowledged": "warning",
@@ -801,7 +806,7 @@ def history_frame(bucket_name: str, key: str) -> pd.DataFrame:
     frame = pd.DataFrame(history)
     if frame.empty:
         return frame
-    return frame.set_index("timestamp")
+    return frame.set_index("timestamp").rename(columns=HISTORY_COLUMN_ALIASES)
 
 
 def capture_node_history(settings: AppConfig, node_name: str, node_status: Dict[str, object]) -> None:
@@ -814,8 +819,8 @@ def capture_node_history(settings: AppConfig, node_name: str, node_status: Dict[
         {
             "timestamp": datetime.now(),
             "CPU %": round(float(node_status.get("cpu", 0.0)) * 100, 2),
-            "RAM utilisee (GiB)": round(bytes_to_gib(int(memory.get("used", 0))), 2),
-            "SWAP utilisee (GiB)": round(bytes_to_gib(int(swap.get("used", 0))), 2),
+            "RAM utilisée (GiB)": round(bytes_to_gib(int(memory.get("used", 0))), 2),
+            "SWAP utilisée (GiB)": round(bytes_to_gib(int(swap.get("used", 0))), 2),
         },
     )
 
@@ -831,7 +836,7 @@ def capture_vm_history(settings: AppConfig, node_name: str, vm_statuses: Dict[in
             {
                 "timestamp": timestamp,
                 "CPU %": round(float(vm.get("cpu", 0.0)) * 100, 2),
-                "RAM utilisee (GiB)": round(bytes_to_gib(int(vm.get("mem", 0))), 2),
+                "RAM utilisée (GiB)": round(bytes_to_gib(int(vm.get("mem", 0))), 2),
             },
         )
 
@@ -861,7 +866,7 @@ def format_vm_table(vm_statuses: Dict[int, Dict[str, object]]) -> pd.DataFrame:
                 "État": vm.get("status", "unknown"),
                 "CPU %": round(float(vm.get("cpu", 0.0)) * 100, 2),
                 "RAM %": round(percent_ratio(mem, maxmem), 2),
-                "RAM utilisee (GiB)": round(bytes_to_gib(mem), 2),
+                "RAM utilisée (GiB)": round(bytes_to_gib(mem), 2),
                 "RAM max (GiB)": round(bytes_to_gib(maxmem), 2),
                 "Uptime": format_uptime(int(vm.get("uptime", 0))),
             }
@@ -873,7 +878,11 @@ def render_line_chart(frame: pd.DataFrame, columns: List[str], height: int = 180
     if frame.empty:
         st.caption("Historique en attente de données...")
         return
-    st.line_chart(frame[columns], height=height, use_container_width=True)
+    available_columns = [column for column in columns if column in frame.columns]
+    if not available_columns:
+        st.caption("Historique en attente de données compatibles...")
+        return
+    st.line_chart(frame[available_columns], height=height, use_container_width=True)
 
 
 def render_alert_banner(current_alerts: List[AlertCandidate]) -> None:
